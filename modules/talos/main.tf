@@ -3,7 +3,7 @@ resource "talos_machine_secrets" "this" {
 }
 
 locals {
-  endpoint = var.dns_enabled ? "https://control-planes.internal.${var.dns_domain}:6443" : "https://placeholder:6443"
+  endpoint = var.dns_enabled ? "https://control-planes.${var.cluster_name}.internal.${var.dns_domain}:6443" : "https://placeholder:6443"
 
   base_config = {
     machine = {
@@ -48,7 +48,11 @@ locals {
       inlineManifests = [
         {
           name     = "cilium-install"
-          contents = file("${path.module}/templates/cilium.yaml")
+          contents = templatefile("${path.module}/templates/cilium.yaml", {
+            cluster_id         = var.cluster_id
+            cluster_name       = var.cluster_name
+            clustermesh_enabled = var.cilium.clustermesh ? "--set clustermesh.useAPIServer=true --set clustermesh.config.enabled=true" : ""
+          })
         }
       ]
     }
@@ -89,8 +93,7 @@ data "talos_machine_configuration" "control_plane" {
       environment = [
         "TS_AUTHKEY=${var.tailscale_auth_key}",
         "TS_HOSTNAME=${var.cluster_name}-${each.key}",
-        "TS_ACCEPT_DNS=true",
-        "TS_USERSPACE=false"
+        "TS_ACCEPT_DNS=true"
       ]
     }) : null
   ])
@@ -118,7 +121,6 @@ data "talos_machine_configuration" "worker" {
         "TS_AUTHKEY=${var.tailscale_auth_key}",
         "TS_HOSTNAME=${var.cluster_name}-${each.key}",
         "TS_ACCEPT_DNS=true",
-        "TS_USERSPACE=false",
         "TS_ROUTES=${join(",", var.tailscale_routes)}"
       ]
     }) : null

@@ -21,12 +21,63 @@ A fresh take on [bouquet2](https://github.com/bouquet2/bouquet2) based on the mi
 * Custom hook that allows removal of Tailscale nodes automatically (was a drawback on bouquet2)
 * No packer required for setup
   * Uses rescue mode in Hetzner in order to install Talos Linux
+  * or local-exec on GCP
 * Cleaner structure that is easier to read and improve
-
+* Supports multiple Cloud providers
+  * GCP and Hetzner currently supported, AWS is coming soon(tm)
+* Automatically gets the latest Kubernetes and Talos Linux version for the cluster
 
 ## Setup
 
 ### Prerequisites
+
+#### Cloud Providers
+* Hetzner
+  * [Hetzner Console API key](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
+* Google Cloud Platform (GCP)
+  * Authenticate using Application Default Credentials (ADC):
+    ```bash
+    gcloud auth application-default login
+    ```
+  * Service Account with the following IAM roles:
+    * `roles/compute.admin` - Manage compute instances, images, and firewalls
+    * `roles/storage.admin` - Manage GCS buckets for Talos images
+    * `roles/iam.serviceAccountUser` - Required if using service accounts on instances
+  * Or create a custom role with these permissions:
+    ```json
+    {
+      "permissions": [
+        "compute.instances.create",
+        "compute.instances.delete",
+        "compute.instances.get",
+        "compute.instances.list",
+        "compute.instances.start",
+        "compute.instances.stop",
+        "compute.instances.update",
+        "compute.images.create",
+        "compute.images.delete",
+        "compute.images.get",
+        "compute.images.list",
+        "compute.firewalls.create",
+        "compute.firewalls.delete",
+        "compute.firewalls.get",
+        "compute.firewalls.list",
+        "compute.firewalls.update",
+        "compute.networks.get",
+        "compute.networks.list",
+        "compute.subnetworks.get",
+        "compute.subnetworks.list",
+        "storage.buckets.create",
+        "storage.buckets.delete",
+        "storage.buckets.get",
+        "storage.buckets.list",
+        "storage.objects.create",
+        "storage.objects.delete",
+        "storage.objects.get",
+        "storage.objects.list"
+      ]
+    }
+    ```
 
 #### Software
 * [OpenTofu](https://opentofu.org)
@@ -34,20 +85,10 @@ A fresh take on [bouquet2](https://github.com/bouquet2/bouquet2) based on the mi
 * [talosctl](https://www.talos.dev/v1.9/introduction/quickstart/#talosctl)
 
 #### Credentials
-* [Tailscale OAuth Secret and ID with RW on devices:core, auth_keys](https://tailscale.com/docs/features/oauth-clients)
-  * You also need to add `tag:k8s-operator` (or any tag) that can access every other node using ACL like so;
-  ```json
-    {
-			"action": "accept",
-			"src": [
-				"tag:k8s-operator",
-			],
-			"dst": [
-				"tag:k8s-operator:*",
-			],
-    }
-   ```
+* [Tailscale OAuth Secret and ID with RW on devices:core, auth_keys, acl](https://tailscale.com/docs/features/oauth-clients)
+  * If you don't enable `manage_acl` you will have to add the required role and ACL yourself.
 * [Hetzner Console API key](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
+* [GCP Application Default Credentials](https://cloud.google.com/docs/authentication/provide-credentials-adc) - Run `gcloud auth application-default login`
 * [Cloudflare API key with Zone.DNS Edit permission](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)
   * Currently only Cloudflare DNS is supported, Hetzner might be added at some point
 
@@ -55,6 +96,7 @@ A fresh take on [bouquet2](https://github.com/bouquet2/bouquet2) based on the mi
 ```bash
 # Deploying the cluster
 cp secrets.tfvars.example secrets.tfvars
+cp terraform.tfvars.json.example terraform.tfvars.json
 
 ### Edit secrets.tfvars and add your secrets
 vim secrets.tfvars
@@ -79,46 +121,66 @@ tofu destroy -var-file=terraform.tfvars.json -var-file=secrets.tfvars
 > [!TIP]
 > This is just the default configuration, you can configure the nodes however you want.
 
+### Hetzner Cloud Example
+
 * rose
     * Cloud: Hetzner Cloud
-    * Region: Falkenstein
+    * Region: Helsinki
     * OS: Talos Linux
     * Role: Control plane node
     * Machine: CX23 (Intel) with 2 vCPU, 4GB RAM, 40GB storage
  
-* lily
+* tulip
     * Cloud: Hetzner Cloud
-    * Region: Falkenstein
+    * Region: Helsinki
     * OS: Talos Linux
     * Role: Worker node
     * Machine: CX23 (Intel) with 2 vCPU, 4GB RAM, 40GB storage
 
-* tulip
-    * Cloud: Hetzner Cloud
-    * Region: Falkenstein
+### GCP Example
+
+* lily
+    * Cloud: Google Cloud Platform
+    * Region: us-central1
+    * OS: Talos Linux
+    * Role: Control plane node
+    * Machine: e2-standard-2 with 2 vCPU, 8GB RAM, 50GB storage
+
+* orchid
+    * Cloud: Google Cloud Platform
+    * Region: us-central1
     * OS: Talos Linux
     * Role: Worker node
-    * Machine: CX23 (Intel) with 2 vCPU, 4GB RAM, 40GB storage
+    * Machine: e2-standard-2 with 2 vCPU, 8GB RAM, 50GB storage
 
 ### System Architecture Overview
 ```mermaid
 graph LR
     classDef dashed stroke-dasharray: 5 5, stroke-width:1px
 
-    subgraph Core [core]
+    subgraph Hetzner [hetzner cluster]
         direction TB
-        core_rose["rose (control plane)"]
-        core_lily["lily (worker)"]
-        core_tulip["tulip (worker)"]
-        core_tailscale["Tailscale<br>(node-to-node) (UDP 41641)"]:::dashed
-        core_cilium_wireguard["Cilium WireGuard<br>(worker-to-worker and pod-to-pod) (UDP 51871)"]:::dashed
-        core_tailscale <--> core_rose
-        core_tailscale <--> core_lily
-        core_tailscale <--> core_tulip
-        core_cilium_wireguard <--> core_rose
-        core_cilium_wireguard <--> core_lily
-        core_cilium_wireguard <--> core_tulip
+        hetzner_rose["rose (control plane)"]
+        hetzner_tulip["tulip (worker)"]
     end
+
+    subgraph GCP [gcp cluster]
+        direction TB
+        gcp_lily["lily (control plane)"]
+        gcp_orchid["orchid (worker)"]
+    end
+
+    core_tailscale["Tailscale<br>(node-to-node) (UDP 41641)"]:::dashed
+    core_cilium_wireguard["Cilium WireGuard<br>(pod-to-pod) (UDP 51871)"]:::dashed
+
+    core_tailscale <--> hetzner_rose
+    core_tailscale <--> hetzner_tulip
+    core_tailscale <--> gcp_lily
+    core_tailscale <--> gcp_orchid
+    core_cilium_wireguard <--> hetzner_rose
+    core_cilium_wireguard <--> hetzner_tulip
+    core_cilium_wireguard <--> gcp_lily
+    core_cilium_wireguard <--> gcp_orchid
 ```
 
 ## License

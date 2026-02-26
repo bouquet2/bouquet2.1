@@ -1,8 +1,5 @@
-data "hcloud_images" "all" {}
-
 locals {
-  ubuntu_images = [for img in data.hcloud_images.all.images : img if img.os_flavor == "ubuntu"]
-  latest_ubuntu = sort([for img in local.ubuntu_images : img.name])[length(local.ubuntu_images) - 1]
+  latest_ubuntu = "ubuntu-24.04"
 }
 
 resource "hcloud_ssh_key" "cluster" {
@@ -10,7 +7,7 @@ resource "hcloud_ssh_key" "cluster" {
   public_key = var.ssh_public_key
   labels = {
     cluster    = var.cluster_name
-    managed-by = "bouquet2.1"
+    managed-by = var.cluster_name
   }
 }
 
@@ -18,7 +15,7 @@ resource "hcloud_firewall" "cluster" {
   name = "${var.cluster_name}-firewall"
   labels = {
     cluster    = var.cluster_name
-    managed-by = "bouquet2.1"
+    managed-by = var.cluster_name
   }
 
   rule {
@@ -87,7 +84,7 @@ resource "hcloud_server" "control_plane" {
 
   labels = {
     cluster    = var.cluster_name
-    managed-by = "bouquet2.1"
+    managed-by = var.cluster_name
     node-role  = "control-plane"
     node-name  = each.value.name
   }
@@ -117,7 +114,7 @@ resource "hcloud_server" "worker" {
 
   labels = {
     cluster    = var.cluster_name
-    managed-by = "bouquet2.1"
+    managed-by = var.cluster_name
     node-role  = "worker"
     node-name  = each.value.name
   }

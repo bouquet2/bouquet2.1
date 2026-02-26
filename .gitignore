@@ -3,7 +3,9 @@
 *.tfstate
 *.tfstate.*
 *.tfvars
+*.tfvars.*
 !*.tfvars.example
+!*.tfvars.*.example
 crash.log
 crash.*.log
 override.tf

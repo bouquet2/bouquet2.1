@@ -74,7 +74,9 @@ spec:
             helm repo add cilium https://helm.cilium.io/
             helm repo update
             helm upgrade --install cilium cilium/cilium --namespace kube-system \
-              --set bpf.masquerade=true \
+              --set cluster.id=${cluster_id} \
+              --set cluster.name=${cluster_name} \
+              --set bpf.masquerade=false \
               --set cgroup.autoMount.enabled=false \
               --set cgroup.hostRoot=/sys/fs/cgroup \
               --set ipam.mode=kubernetes \
@@ -92,7 +94,11 @@ spec:
               --set tunnelProtocol=vxlan \
               --set encryption.enabled=true \
               --set encryption.type=wireguard \
+              --set hubble.enabled=true \
+              --set hubble.relay.enabled=true \
+              --set hubble.ui.enabled=true \
               --set encryption.nodeEncryption=true \
               --set envoyConfig.enabled=true \
               --set-string operator.extraEnv[0].value=localhost \
-              --set-string operator.extraEnv[1].value=7445
+              --set-string operator.extraEnv[1].value=7445 \
+              ${clustermesh_enabled}

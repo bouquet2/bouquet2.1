@@ -1,0 +1,83 @@
+{
+  "clusters": {
+    "hetzner": {
+      "cluster_id": 1,
+      "control_planes": [
+        {
+          "name": "rose",
+          "provider": "hetzner",
+          "server_type": "cx23",
+          "location": "hel1",
+          "install_disk": "/dev/sda"
+        }
+      ],
+      "workers": [
+        {
+          "name": "tulip",
+          "provider": "hetzner",
+          "server_type": "cx23",
+          "location": "hel1",
+          "install_disk": "/dev/sda"
+        }
+      ]
+    },
+    "gcp": {
+      "cluster_id": 2,
+      "control_planes": [
+        {
+          "name": "lily",
+          "provider": "gcp",
+          "machine_type": "e2-standard-2",
+          "disk_size": 50
+        }
+      ],
+      "workers": [
+        {
+          "name": "orchid",
+          "provider": "gcp",
+          "machine_type": "e2-standard-2",
+          "disk_size": 50
+        }
+      ],
+      "gcp": {
+        "project_id": "project-id",
+        "region": "us-central1",
+        "zone": "us-central1-a",
+        "network": "default"
+      }
+    }
+  },
+  "tailscale": {
+    "enabled": true,
+    "tailnet": "tailnet-id",
+    "tag": "tag:k8s-operator",
+    "manage_acl": false,
+    "routes": [
+      "10.96.0.0/12",
+      "10.244.0.0/16",
+      "fd00:1::/112",
+      "fd00::/48"
+    ]
+  },
+  "dns": {
+    "enabled": true,
+    "domain": "example.com",
+    "internal_domain": "internal.example.com"
+  },
+  "cilium": {
+    "enabled": true,
+    "kube_proxy_replacement": true,
+    "ipam_mode": "kubernetes",
+    "clustermesh": true
+  },
+  "network": {
+    "pod_subnets": [
+      "10.244.0.0/16",
+      "fd00::/48"
+    ],
+    "service_subnets": [
+      "10.96.0.0/12",
+      "fd00:1::/112"
+    ]
+  }
+}

@@ -1,9 +1,3 @@
-variable "cluster_name" {
-  description = "Name of the Talos cluster"
-  type        = string
-  default     = "bouquet21"
-}
-
 variable "talos_version" {
   description = "Talos Linux version (null = latest)"
   type        = string
@@ -16,36 +10,52 @@ variable "kubernetes_version" {
   default     = null
 }
 
-variable "control_planes" {
-  description = "Control plane node configurations"
-  type = list(object({
-    name         = string
-    server_type  = optional(string, "cx23")
-    location     = optional(string, "fsn1")
-    install_disk = optional(string, "/dev/sda")
-  }))
-  default = []
-}
+variable "clusters" {
+  description = "Multi-cluster configuration with Cilium Cluster Mesh support"
+  type = map(object({
+    cluster_id = number
 
-variable "workers" {
-  description = "Worker node configurations"
-  type = list(object({
-    name         = string
-    server_type  = optional(string, "cx23")
-    location     = optional(string, "fsn1")
-    install_disk = optional(string, "/dev/sda")
+    control_planes = list(object({
+      name         = string
+      provider     = string
+      server_type  = optional(string, "cx23")
+      location     = optional(string, "fsn1")
+      install_disk = optional(string, "/dev/sda")
+      machine_type = optional(string, "e2-standard-2")
+      disk_size    = optional(number, 50)
+    }))
+
+    workers = list(object({
+      name         = string
+      provider     = string
+      server_type  = optional(string, "cx23")
+      location     = optional(string, "fsn1")
+      install_disk = optional(string, "/dev/sda")
+      machine_type = optional(string, "e2-standard-2")
+      disk_size    = optional(number, 50)
+    }))
+
+    gcp = optional(object({
+      project_id = string
+      region     = string
+      zone       = string
+      network    = optional(string, "default")
+      subnetwork = optional(string, "")
+      gcs_bucket = optional(string, "")
+    }))
   }))
-  default = []
+  default = {}
 }
 
 variable "tailscale" {
-  description = "Tailscale VPN configuration"
+  description = "Tailscale VPN configuration (shared across all clusters)"
   type = object({
     enabled         = bool
     tailnet         = optional(string, "")
-    oauth_client_id = optional(string, "")
     tag             = optional(string, "tag:k8s-operator")
     routes          = optional(list(string), [])
+    manage_acl      = optional(bool, false)
+    acl_policy      = optional(string, "")
   })
   default = {
     enabled = false
@@ -64,21 +74,22 @@ variable "dns" {
   }
 }
 
-variable "network" {
-  description = "Network configuration"
-  type = object({
-    pod_subnets     = optional(list(string), ["10.244.0.0/16"])
-    service_subnets = optional(list(string), ["10.96.0.0/12"])
-  })
-  default = {}
-}
-
 variable "cilium" {
-  description = "Cilium CNI configuration"
+  description = "Cilium CNI configuration (shared across all clusters)"
   type = object({
     enabled                = optional(bool, true)
     kube_proxy_replacement = optional(bool, true)
     ipam_mode              = optional(string, "kubernetes")
+    clustermesh            = optional(bool, false)
+  })
+  default = {}
+}
+
+variable "network" {
+  description = "Network configuration (shared across all clusters)"
+  type = object({
+    pod_subnets     = optional(list(string), ["10.244.0.0/16"])
+    service_subnets = optional(list(string), ["10.96.0.0/12"])
   })
   default = {}
 }

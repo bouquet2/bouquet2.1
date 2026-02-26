@@ -5,18 +5,24 @@ variable "cluster_name" {
 variable "control_planes" {
   type = list(object({
     name         = string
+    provider     = optional(string)
     server_type  = optional(string)
     location     = optional(string)
     install_disk = optional(string)
+    machine_type = optional(string)
+    disk_size    = optional(number)
   }))
 }
 
 variable "workers" {
   type = list(object({
     name         = string
+    provider     = optional(string)
     server_type  = optional(string)
     location     = optional(string)
     install_disk = optional(string)
+    machine_type = optional(string)
+    disk_size    = optional(number)
   }))
 }
 

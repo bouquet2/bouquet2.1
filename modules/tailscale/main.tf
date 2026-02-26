@@ -8,33 +8,17 @@ variable "create_key_only" {
   default = false
 }
 
-variable "cluster_name" {
-  type    = string
-  default = ""
-}
-
-variable "routes" {
-  type    = list(string)
-  default = []
-}
-
-variable "control_planes" {
-  type = list(object({
-    name = string
+variable "clusters" {
+  type = map(object({
+    control_planes = list(object({ name = string }))
+    workers        = list(object({ name = string }))
   }))
-  default = []
+  default = {}
 }
 
-variable "workers" {
-  type = list(object({
-    name = string
-  }))
-  default = []
-}
-
-variable "install_complete" {
-  type    = list(string)
-  default = []
+variable "cluster_install_complete" {
+  type    = map(list(string))
+  default = {}
 }
 
 variable "tailnet" {
@@ -44,6 +28,7 @@ variable "tailnet" {
 
 variable "oauth_client_id" {
   type    = string
+  sensitive = true
   default = ""
 }
 
@@ -51,6 +36,35 @@ variable "oauth_client_secret" {
   type      = string
   sensitive = true
   default   = ""
+}
+
+variable "manage_acl" {
+  type    = bool
+  default = false
+}
+
+variable "acl_policy" {
+  type    = string
+  default = ""
+}
+
+resource "tailscale_acl" "k8s_operator" {
+  count = var.manage_acl ? 1 : 0
+
+  acl = coalesce(var.acl_policy, jsonencode({
+    acls = [
+      {
+        action = "accept"
+        src    = [var.tag]
+        dst    = ["${var.tag}:*"]
+      }
+    ]
+    tagOwners = {
+      "tag:k8s-operator" = ["autogroup:admin"]
+    }
+  }))
+
+  overwrite_existing_content = true
 }
 
 resource "tailscale_tailnet_key" "auth" {
@@ -61,36 +75,39 @@ resource "tailscale_tailnet_key" "auth" {
   expiry        = 3600
 }
 
-data "tailscale_device" "control_planes" {
-  for_each = var.create_key_only ? {} : { for cp in var.control_planes : cp.name => cp }
-
-  hostname = "${var.cluster_name}-${each.key}"
-  wait_for = "60s"
-
-  depends_on = [var.install_complete]
+locals {
+  all_nodes = var.create_key_only ? {} : merge([
+    for cluster_name, cluster in var.clusters : merge(
+      { for cp in cluster.control_planes : "${cluster_name}-${cp.name}" => { cluster_name = cluster_name, node_name = cp.name } },
+      { for w in cluster.workers : "${cluster_name}-${w.name}" => { cluster_name = cluster_name, node_name = w.name } }
+    )
+  ]...)
 }
 
-data "tailscale_device" "workers" {
-  for_each = var.create_key_only ? {} : { for w in var.workers : w.name => w }
+data "tailscale_device" "nodes" {
+  for_each = local.all_nodes
 
-  hostname = "${var.cluster_name}-${each.key}"
+  hostname = each.key
   wait_for = "60s"
 
-  depends_on = [var.install_complete]
+  depends_on = [var.cluster_install_complete]
 }
 
 locals {
-  node_ips = var.create_key_only ? {} : merge(
-    { for name, device in data.tailscale_device.control_planes : device.hostname => split("/", device.addresses[0])[0] },
-    { for name, device in data.tailscale_device.workers : device.hostname => split("/", device.addresses[0])[0] }
-  )
+  node_ips = var.create_key_only ? {} : {
+    for name, device in data.tailscale_device.nodes : device.hostname => split("/", device.addresses[0])[0]
+  }
+
+  cluster_node_ips = var.create_key_only ? {} : {
+    for cluster_name, cluster in var.clusters : cluster_name => merge(
+      { for cp in cluster.control_planes : "${cluster_name}-${cp.name}" => split("/", data.tailscale_device.nodes["${cluster_name}-${cp.name}"].addresses[0])[0] },
+      { for w in cluster.workers : "${cluster_name}-${w.name}" => split("/", data.tailscale_device.nodes["${cluster_name}-${w.name}"].addresses[0])[0] }
+    )
+  }
 }
 
 resource "null_resource" "device_cleanup" {
-  for_each = var.create_key_only ? {} : merge(
-    { for k, d in data.tailscale_device.control_planes : k => d },
-    { for k, d in data.tailscale_device.workers : k => d }
-  )
+  for_each = var.create_key_only ? {} : local.all_nodes
 
   provisioner "local-exec" {
     when    = destroy
@@ -111,7 +128,7 @@ resource "null_resource" "device_cleanup" {
   }
 
   triggers = {
-    node_name           = "${var.cluster_name}-${each.key}"
+    node_name           = each.key
     tailnet             = var.tailnet
     oauth_client_id     = var.oauth_client_id
     oauth_client_secret = var.oauth_client_secret
@@ -123,6 +140,10 @@ output "auth_key" {
   sensitive = true
 }
 
-output "node_ips" {
+output "all_node_ips" {
   value = local.node_ips
+}
+
+output "cluster_node_ips" {
+  value = local.cluster_node_ips
 }
