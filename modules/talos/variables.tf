@@ -53,6 +53,7 @@ variable "cilium" {
     kube_proxy_replacement = optional(bool)
     ipam_mode              = optional(string)
     clustermesh            = optional(bool, false)
+    gateway_api            = optional(bool, false)
   })
   default = {}
 }

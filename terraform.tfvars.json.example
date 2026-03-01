@@ -68,7 +68,8 @@
     "enabled": true,
     "kube_proxy_replacement": true,
     "ipam_mode": "kubernetes",
-    "clustermesh": true
+    "clustermesh": true,
+    "gateway_api": false
   },
   "network": {
     "pod_subnets": [

@@ -101,4 +101,5 @@ spec:
               --set envoyConfig.enabled=true \
               --set-string operator.extraEnv[0].value=localhost \
               --set-string operator.extraEnv[1].value=7445 \
-              ${clustermesh_enabled}
+              ${clustermesh_enabled} \
+              ${gateway_api_enabled}

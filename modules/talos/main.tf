@@ -28,10 +28,19 @@ locals {
         serviceSubnets = var.network.service_subnets
       }
       allowSchedulingOnControlPlanes = true
-      extraManifests = [
-        "https://raw.githubusercontent.com/alex1989hu/kubelet-serving-cert-approver/main/deploy/standalone-install.yaml",
-        "https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml"
-      ]
+      extraManifests = concat(
+        [
+          "https://raw.githubusercontent.com/alex1989hu/kubelet-serving-cert-approver/main/deploy/standalone-install.yaml",
+          "https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml"
+        ],
+        var.cilium.enabled && var.cilium.gateway_api ? [
+          "https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.5.0/config/crd/standard/gateway.networking.k8s.io_gatewayclasses.yaml",
+          "https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.5.0/config/crd/standard/gateway.networking.k8s.io_gateways.yaml",
+          "https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.5.0/config/crd/standard/gateway.networking.k8s.io_httproutes.yaml",
+          "https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.5.0/config/crd/standard/gateway.networking.k8s.io_referencegrants.yaml",
+          "https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.5.0/config/crd/standard/gateway.networking.k8s.io_grpcroutes.yaml"
+        ] : []
+      )
     }
   }
 
@@ -49,9 +58,10 @@ locals {
         {
           name     = "cilium-install"
           contents = templatefile("${path.module}/templates/cilium.yaml", {
-            cluster_id         = var.cluster_id
-            cluster_name       = var.cluster_name
+            cluster_id          = var.cluster_id
+            cluster_name        = var.cluster_name
             clustermesh_enabled = var.cilium.clustermesh ? "--set clustermesh.useAPIServer=true --set clustermesh.config.enabled=true" : ""
+            gateway_api_enabled = var.cilium.gateway_api ? "--set gatewayAPI.enabled=true" : ""
           })
         }
       ]

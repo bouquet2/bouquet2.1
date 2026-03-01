@@ -81,6 +81,7 @@ variable "cilium" {
     kube_proxy_replacement = optional(bool, true)
     ipam_mode              = optional(string, "kubernetes")
     clustermesh            = optional(bool, false)
+    gateway_api            = optional(bool, false)
   })
   default = {}
 }
@@ -92,4 +93,16 @@ variable "network" {
     service_subnets = optional(list(string), ["10.96.0.0/12"])
   })
   default = {}
+}
+
+variable "onepassword_vault" {
+  description = "1Password vault name for secrets"
+  type        = string
+  default     = "Infrastructure"
+}
+
+variable "onepassword_account" {
+  description = "1Password account name (as shown in desktop app sidebar). Alternatively, set OP_ACCOUNT environment variable."
+  type        = string
+  default     = null
 }

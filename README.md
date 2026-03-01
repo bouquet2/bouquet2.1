@@ -93,25 +93,49 @@ A fresh take on [bouquet2](https://github.com/bouquet2/bouquet2) based on the mi
   * Currently only Cloudflare DNS is supported, Hetzner might be added at some point
 
 ### Setup
+
+#### Secrets (choose one method)
+
+**Option 1: 1Password (default)**
+
+Secrets are fetched from 1Password automatically when no `-var-file=secrets.tfvars` is provided.
+
+1. Enable "Integrate with other apps" in the 1Password desktop app
+   (Settings > Developer > Integrate with the 1Password SDKs)
+2. Set your 1Password account name (as shown in the app sidebar) either:
+   - In `terraform.tfvars.json`: `"onepassword_account": "your-account-name"`
+   - Or via environment variable: `export OP_ACCOUNT="your-account-name"`
+3. Create items in your "Infrastructure" vault (only the ones you use):
+   - `bouquet-hcloud-token` — Hetzner Cloud API token (password field)
+   - `bouquet-cloudflare-api-token` — Cloudflare API token (password field)
+   - `bouquet-tailscale-oauth-secret` — Tailscale OAuth secret (if using Tailscale)
+   - `bouquet-tailscale-oauth-client-id` — Tailscale OAuth client ID (if using Tailscale)
+   - `bouquet-gcp-credentials` — GCP service account JSON (if using GCP)
+
+**Option 2: secrets.tfvars (fallback)**
+
 ```bash
-# Deploying the cluster
 cp secrets.tfvars.example secrets.tfvars
+vim secrets.tfvars  # add your secrets
+```
+
+#### Deploy
+
+```bash
 cp terraform.tfvars.json.example terraform.tfvars.json
-
-### Edit secrets.tfvars and add your secrets
-vim secrets.tfvars
-
-### Edit terraform.tfvars.json and update Tailscale, Cloudflare credentials 
 vim terraform.tfvars.json
 
-### Planning the deployment
-tofu plan -var-file=terraform.tfvars.json -var-file=secrets.tfvars
+# With 1Password (secrets fetched automatically):
+tofu init
+tofu plan -var-file=terraform.tfvars.json
+tofu apply -var-file=terraform.tfvars.json
 
-### Deploying the deployment
+# With secrets.tfvars:
+tofu plan -var-file=terraform.tfvars.json -var-file=secrets.tfvars
 tofu apply -var-file=terraform.tfvars.json -var-file=secrets.tfvars
 
 # Destroying the cluster
-tofu destroy -var-file=terraform.tfvars.json -var-file=secrets.tfvars
+tofu destroy -var-file=terraform.tfvars.json
 ```
 
 

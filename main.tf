@@ -1,14 +1,14 @@
 provider "hcloud" {
-  token = var.hcloud_token
+  token = local.effective_hcloud_token
 }
 
 provider "cloudflare" {
-  api_token = var.cloudflare_api_token
+  api_token = local.effective_cloudflare_api_token
 }
 
 provider "tailscale" {
-  oauth_client_id     = var.tailscale_oauth_client_id
-  oauth_client_secret = var.tailscale_oauth_secret
+  oauth_client_id     = local.effective_tailscale_oauth_client_id
+  oauth_client_secret = local.effective_tailscale_oauth_secret
   tailnet             = var.tailscale.tailnet
 }
 
@@ -16,33 +16,93 @@ provider "google" {
   project     = local.gcp_project_id
   region      = local.gcp_region
   zone        = local.gcp_zone
-  credentials = var.gcp_credentials != "" ? var.gcp_credentials : null
+  credentials = local.effective_gcp_credentials != "" ? local.effective_gcp_credentials : null
+}
+
+provider "onepassword" {
+  account = var.onepassword_account
+}
+
+locals {
+  has_gcp_clusters = length([for k, v in var.clusters : k if try(v.gcp.project_id, "") != ""]) > 0
+  needs_onepassword = (
+    var.hcloud_token == null ||
+    var.cloudflare_api_token == null ||
+    (var.tailscale_oauth_secret == null && var.tailscale.enabled) ||
+    (var.tailscale_oauth_client_id == null && var.tailscale.enabled) ||
+    (var.gcp_credentials == null && local.has_gcp_clusters)
+  )
+}
+
+data "onepassword_vault" "this" {
+  count = local.needs_onepassword ? 1 : 0
+  name  = var.onepassword_vault
+}
+
+data "onepassword_item" "hcloud_token" {
+  count = var.hcloud_token == null ? 1 : 0
+  vault = data.onepassword_vault.this[0].uuid
+  title = "bouquet-hcloud-token"
+}
+
+data "onepassword_item" "cloudflare_api_token" {
+  count = var.cloudflare_api_token == null ? 1 : 0
+  vault = data.onepassword_vault.this[0].uuid
+  title = "bouquet-cloudflare-api-token"
+}
+
+data "onepassword_item" "tailscale_oauth_secret" {
+  count = var.tailscale_oauth_secret == null && var.tailscale.enabled ? 1 : 0
+  vault = data.onepassword_vault.this[0].uuid
+  title = "bouquet-tailscale-oauth-secret"
+}
+
+data "onepassword_item" "tailscale_oauth_client_id" {
+  count = var.tailscale_oauth_client_id == null && var.tailscale.enabled ? 1 : 0
+  vault = data.onepassword_vault.this[0].uuid
+  title = "bouquet-tailscale-oauth-client-id"
+}
+
+data "onepassword_item" "gcp_credentials" {
+  count = var.gcp_credentials == null && local.has_gcp_clusters ? 1 : 0
+  vault = data.onepassword_vault.this[0].uuid
+  title = "bouquet-gcp-credentials"
+}
+
+locals {
+  effective_hcloud_token             = var.hcloud_token != null ? var.hcloud_token : data.onepassword_item.hcloud_token[0].password
+  effective_cloudflare_api_token     = var.cloudflare_api_token != null ? var.cloudflare_api_token : data.onepassword_item.cloudflare_api_token[0].password
+  effective_tailscale_oauth_secret   = var.tailscale_oauth_secret != null ? var.tailscale_oauth_secret : try(data.onepassword_item.tailscale_oauth_secret[0].password, "")
+  effective_tailscale_oauth_client_id = var.tailscale_oauth_client_id != null ? var.tailscale_oauth_client_id : try(data.onepassword_item.tailscale_oauth_client_id[0].password, "")
+  effective_gcp_credentials          = var.gcp_credentials != null ? var.gcp_credentials : try(data.onepassword_item.gcp_credentials[0].password, "")
 }
 
 variable "hcloud_token" {
   description = "Hetzner Cloud API token"
   type        = string
   sensitive   = true
+  default     = null
 }
 
 variable "cloudflare_api_token" {
   description = "Cloudflare API token"
   type        = string
   sensitive   = true
+  default     = null
 }
 
 variable "tailscale_oauth_secret" {
   description = "Tailscale OAuth client secret"
   type        = string
   sensitive   = true
-  default     = ""
+  default     = null
 }
 
 variable "tailscale_oauth_client_id" {
   description = "Tailscale OAuth client ID"
   type        = string
   sensitive   = true
-  default     = ""
+  default     = null
 }
 
 variable "gcp_credentials" {
@@ -147,7 +207,7 @@ module "hetzner" {
   ssh_public_key        = tls_private_key.ssh.public_key_openssh
   ssh_private_key       = tls_private_key.ssh.private_key_openssh
   talos_version         = local.talos_version
-  hcloud_token          = var.hcloud_token
+  hcloud_token          = local.effective_hcloud_token
   control_plane_configs = { for cp in each.value.control_planes : cp.name => module.talos[each.key].control_plane_configs[cp.name] }
   worker_configs        = { for w in each.value.workers : w.name => module.talos[each.key].worker_configs[w.name] }
 }
@@ -280,8 +340,8 @@ module "tailscale_devices" {
   cluster_install_complete = local.cluster_install_complete
   tag                 = var.tailscale.tag
   tailnet             = var.tailscale.tailnet
-  oauth_client_id     = var.tailscale_oauth_client_id
-  oauth_client_secret = var.tailscale_oauth_secret
+  oauth_client_id     = local.effective_tailscale_oauth_client_id
+  oauth_client_secret = local.effective_tailscale_oauth_secret
   manage_acl          = var.tailscale.manage_acl
   acl_policy          = var.tailscale.acl_policy
 }
