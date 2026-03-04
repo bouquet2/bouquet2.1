@@ -83,6 +83,11 @@ resource "google_compute_firewall" "cluster" {
   }
 
   allow {
+    protocol = "tcp"
+    ports    = ["80", "443"]
+  }
+
+  allow {
     protocol = "icmp"
   }
 

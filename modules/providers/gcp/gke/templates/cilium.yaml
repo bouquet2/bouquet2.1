@@ -48,24 +48,12 @@ spec:
       restartPolicy: OnFailure
       tolerations:
         - operator: Exists
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: node-role.kubernetes.io/control-plane
-                    operator: Exists
       serviceAccount: cilium-install
       serviceAccountName: cilium-install
       hostNetwork: true
       containers:
       - name: helm-install-cilium
         image: alpine:latest
-        env:
-        - name: KUBERNETES_SERVICE_HOST
-          value: "localhost"
-        - name: KUBERNETES_SERVICE_PORT
-          value: "7445"
         command:
           - sh
           - -c
@@ -73,32 +61,17 @@ spec:
             apk add --no-cache helm
             helm repo add cilium https://helm.cilium.io/
             helm repo update
-            helm upgrade --install cilium cilium/cilium \
-              --version ${cilium_version} \
-              --namespace kube-system \
+            helm upgrade --install cilium cilium/cilium --namespace kube-system \
+              --version ${cilium_ver} \
               --set cluster.id=${cluster_id} \
               --set cluster.name=${cluster_name} \
-              --set bpf.masquerade=true \
-              --set bpf.hostLegacyRouting=true \
+              --set gke.enabled=true \
+              --set cni.binPath=/home/kubernetes/bin \
+              --set ipv4NativeRoutingCIDR=${native_cidr} \
               --set cgroup.autoMount.enabled=false \
               --set cgroup.hostRoot=/sys/fs/cgroup \
-              --set envoyConfig.enabled=true \
+              --set sysctlFix.enabled=false \
               --set hubble.enabled=true \
               --set hubble.relay.enabled=true \
               --set hubble.ui.enabled=true \
-              --set ipam.mode=kubernetes \
-              --set ipv6.enabled=true \
-              --set k8sServiceHost=localhost \
-              --set k8sServicePort=7445 \
-              --set kubeProxyReplacement=true \
-              --set operator.extraEnv[0].name=KUBERNETES_SERVICE_HOST \
-              --set operator.extraEnv[1].name=KUBERNETES_SERVICE_PORT \
-              --set operator.useHostNetwork=true \
-              --set routingMode=tunnel \
-              --set securityContext.capabilities.ciliumAgent="{CHOWN,KILL,NET_ADMIN,NET_RAW,IPC_LOCK,SYS_ADMIN,SYS_RESOURCE,DAC_OVERRIDE,FOWNER,SETGID,SETUID}" \
-              --set securityContext.capabilities.cleanCiliumState="{NET_ADMIN,SYS_ADMIN,SYS_RESOURCE}" \
-              --set tunnelMTU=1170 \
-              --set tunnelProtocol=vxlan \
-              --set-string operator.extraEnv[0].value=localhost \
-              --set-string operator.extraEnv[1].value=7445 \
-              ${clustermesh_enabled} ${gateway_api_enabled} ${encryption_flags}
+              ${encryption_flags} ${clustermesh_enabled} ${gateway_api_enabled}

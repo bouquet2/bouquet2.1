@@ -23,6 +23,11 @@ variable "tailscale_ips" {
   default = {}
 }
 
+variable "lb_subdomain" {
+  type    = string
+  default = "lb"
+}
+
 data "cloudflare_zone" "this" {
   name = var.domain
 }
@@ -30,6 +35,7 @@ data "cloudflare_zone" "this" {
 locals {
   all_control_plane_ips = merge(values(var.cluster_control_plane_ips)...)
   all_worker_ips        = merge(values(var.cluster_worker_ips)...)
+  all_node_ips          = merge(local.all_control_plane_ips, local.all_worker_ips)
 }
 
 resource "cloudflare_record" "control_plane_api_global" {
@@ -38,8 +44,8 @@ resource "cloudflare_record" "control_plane_api_global" {
   zone_id = data.cloudflare_zone.this.id
   name    = "control-planes.internal"
   type    = "A"
-  content = lookup(var.tailscale_ips, each.key, each.value)
   ttl     = 300
+  content = lookup(var.tailscale_ips, each.key, each.value)
   proxied = false
 }
 
@@ -115,4 +121,15 @@ resource "cloudflare_record" "node_internal" {
   content = lookup(var.tailscale_ips, each.key, each.value.ip)
   ttl     = 300
   proxied = false
+}
+
+resource "cloudflare_record" "lb" {
+  for_each = local.all_node_ips
+
+  zone_id = data.cloudflare_zone.this.id
+  name    = var.lb_subdomain
+  type    = "A"
+  content = each.value
+  ttl     = 1
+  proxied = true
 }

@@ -25,6 +25,9 @@ terraform.rc
 .DS_Store
 Thumbs.db
 
+# Generated files
+modules/providers/gke/generated/
+
 # Secrets
 secrets.tfvars
 *.pem

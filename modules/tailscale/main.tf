@@ -16,6 +16,11 @@ variable "clusters" {
   default = {}
 }
 
+variable "gke_clusters" {
+  type    = list(string)
+  default = []
+}
+
 variable "cluster_install_complete" {
   type    = map(list(string))
   default = {}
@@ -27,9 +32,9 @@ variable "tailnet" {
 }
 
 variable "oauth_client_id" {
-  type    = string
+  type      = string
   sensitive = true
-  default = ""
+  default   = ""
 }
 
 variable "oauth_client_secret" {
@@ -76,20 +81,30 @@ resource "tailscale_tailnet_key" "auth" {
 }
 
 locals {
-  all_nodes = var.create_key_only ? {} : merge([
+  talos_nodes = var.create_key_only ? {} : merge([
     for cluster_name, cluster in var.clusters : merge(
-      { for cp in cluster.control_planes : "${cluster_name}-${cp.name}" => { cluster_name = cluster_name, node_name = cp.name } },
-      { for w in cluster.workers : "${cluster_name}-${w.name}" => { cluster_name = cluster_name, node_name = w.name } }
+      { for cp in cluster.control_planes : "${cluster_name}-${cp.name}" => { cluster_name = cluster_name, node_name = cp.name, is_gke = false } },
+      { for w in cluster.workers : "${cluster_name}-${w.name}" => { cluster_name = cluster_name, node_name = w.name, is_gke = false } }
     )
+    if !contains(var.gke_clusters, cluster_name)
   ]...)
+
+  gke_connectors = var.create_key_only ? {} : {
+    for cluster_name in var.gke_clusters : "${cluster_name}-connector" => {
+      cluster_name = cluster_name
+      node_name    = "connector"
+      is_gke       = true
+    }
+  }
+
+  all_devices = merge(local.talos_nodes, local.gke_connectors)
 }
 
 data "tailscale_device" "nodes" {
-  for_each = local.all_nodes
+  for_each = local.all_devices
 
-  hostname = each.key
-  wait_for = "60s"
-
+  hostname   = each.key
+  wait_for   = "60s"
   depends_on = [var.cluster_install_complete]
 }
 
@@ -100,14 +115,15 @@ locals {
 
   cluster_node_ips = var.create_key_only ? {} : {
     for cluster_name, cluster in var.clusters : cluster_name => merge(
-      { for cp in cluster.control_planes : "${cluster_name}-${cp.name}" => split("/", data.tailscale_device.nodes["${cluster_name}-${cp.name}"].addresses[0])[0] },
-      { for w in cluster.workers : "${cluster_name}-${w.name}" => split("/", data.tailscale_device.nodes["${cluster_name}-${w.name}"].addresses[0])[0] }
+      { for cp in cluster.control_planes : "${cluster_name}-${cp.name}" => split("/", data.tailscale_device.nodes["${cluster_name}-${cp.name}"].addresses[0])[0] if !contains(var.gke_clusters, cluster_name) },
+      { for w in cluster.workers : "${cluster_name}-${w.name}" => split("/", data.tailscale_device.nodes["${cluster_name}-${w.name}"].addresses[0])[0] if !contains(var.gke_clusters, cluster_name) },
+      contains(var.gke_clusters, cluster_name) ? { "${cluster_name}-connector" = split("/", data.tailscale_device.nodes["${cluster_name}-connector"].addresses[0])[0] } : {}
     )
   }
 }
 
 resource "null_resource" "device_cleanup" {
-  for_each = var.create_key_only ? {} : local.all_nodes
+  for_each = var.create_key_only ? {} : local.all_devices
 
   provisioner "local-exec" {
     when    = destroy

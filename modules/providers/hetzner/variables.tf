@@ -2,6 +2,11 @@ variable "cluster_name" {
   type = string
 }
 
+variable "network_id" {
+  type        = number
+  description = "Hetzner private network ID to attach servers to"
+}
+
 variable "control_planes" {
   type = list(object({
     name         = string

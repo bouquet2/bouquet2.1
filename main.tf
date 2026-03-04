@@ -24,14 +24,33 @@ provider "onepassword" {
 }
 
 locals {
+  talos_clusters = { for k, v in var.clusters : k => v if lookup(v, "type", "talos") == "talos" }
+  gke_clusters   = { for k, v in var.clusters : k => v if lookup(v, "type", "talos") == "gke" }
+  
   has_gcp_clusters = length([for k, v in var.clusters : k if try(v.gcp.project_id, "") != ""]) > 0
+  has_gke_clusters = length(local.gke_clusters) > 0
+  
   needs_onepassword = (
     var.hcloud_token == null ||
     var.cloudflare_api_token == null ||
     (var.tailscale_oauth_secret == null && var.tailscale.enabled) ||
     (var.tailscale_oauth_client_id == null && var.tailscale.enabled) ||
-    (var.gcp_credentials == null && local.has_gcp_clusters)
+    (var.gcp_credentials == null && (local.has_gcp_clusters || local.has_gke_clusters))
   )
+  
+  clustermesh_service_type = var.tailscale.enabled ? "NodePort" : "LoadBalancer"
+
+  has_private_gke = anytrue([
+    for name, cluster in var.clusters :
+    try(cluster.gcp.enable_private_cluster, false)
+    if try(cluster.type, "talos") == "gke"
+  ])
+
+  cilium_effective = merge(var.cilium, {
+    encryption_enabled = coalesce(var.cilium.encryption_enabled, false)
+    encryption_type    = var.cilium.encryption_type
+    node_encryption    = var.cilium.node_encryption
+  })
 }
 
 data "onepassword_vault" "this" {
@@ -112,6 +131,12 @@ variable "gcp_credentials" {
   default     = ""
 }
 
+variable "cilium_version" {
+  description = "Cilium Helm chart version (null = latest, must match across all clusters for ClusterMesh compatibility)"
+  type        = string
+  default     = null
+}
+
 data "http" "talos_latest_release" {
   count = var.talos_version == null ? 1 : 0
   url   = "https://api.github.com/repos/siderolabs/talos/releases/latest"
@@ -120,6 +145,11 @@ data "http" "talos_latest_release" {
 data "http" "kubelet_latest_release" {
   count = var.kubernetes_version == null ? 1 : 0
   url   = "https://api.github.com/repos/siderolabs/kubelet/releases/latest"
+}
+
+data "http" "cilium_latest_release" {
+  count = var.cilium_version == null ? 1 : 0
+  url   = "https://api.github.com/repos/cilium/cilium/releases/latest"
 }
 
 resource "terraform_data" "talos_version" {
@@ -138,17 +168,46 @@ resource "terraform_data" "kubernetes_version" {
   }
 }
 
+resource "terraform_data" "cilium_version" {
+  count = var.cilium_version == null ? 1 : 0
+  input = trimprefix(jsondecode(data.http.cilium_latest_release[0].response_body).tag_name, "v")
+  lifecycle {
+    ignore_changes = [input]
+  }
+}
+
 locals {
   talos_version      = coalesce(var.talos_version, terraform_data.talos_version[0].input)
   kubernetes_version = coalesce(var.kubernetes_version, terraform_data.kubernetes_version[0].input)
+  cilium_version     = coalesce(var.cilium_version, terraform_data.cilium_version[0].input)
 
-  gcp_project_id = length([for k, v in var.clusters : v.gcp.project_id if try(v.gcp.project_id, "") != ""]) > 0 ? values(var.clusters)[0].gcp.project_id : ""
-  gcp_region     = length([for k, v in var.clusters : v.gcp.region if try(v.gcp.region, "") != ""]) > 0 ? values(var.clusters)[0].gcp.region : ""
-  gcp_zone       = length([for k, v in var.clusters : v.gcp.zone if try(v.gcp.zone, "") != ""]) > 0 ? values(var.clusters)[0].gcp.zone : ""
+  gcp_project_id = length([for k, v in var.clusters : v.gcp.project_id if try(v.gcp.project_id, "") != ""]) > 0 ? values(var.clusters)[0].gcp.project_id : null
+  gcp_region     = length([for k, v in var.clusters : v.gcp.region if try(v.gcp.region, "") != ""]) > 0 ? values(var.clusters)[0].gcp.region : null
+  gcp_zone       = length([for k, v in var.clusters : v.gcp.zone if try(v.gcp.zone, "") != ""]) > 0 ? values(var.clusters)[0].gcp.zone : null
 }
 
 resource "tls_private_key" "ssh" {
   algorithm = "ED25519"
+}
+
+resource "hcloud_network" "cluster" {
+  for_each = { for k, v in local.cluster_hetzner_nodes : k => v if length(v.control_planes) > 0 || length(v.workers) > 0 }
+
+  name     = "${each.key}-network"
+  ip_range = "10.0.0.0/16"
+  labels = {
+    cluster    = each.key
+    managed-by = each.key
+  }
+}
+
+resource "hcloud_network_subnet" "cluster" {
+  for_each = { for k, v in local.cluster_hetzner_nodes : k => v if length(v.control_planes) > 0 || length(v.workers) > 0 }
+
+  network_id   = hcloud_network.cluster[each.key].id
+  type         = "cloud"
+  network_zone = "eu-central"
+  ip_range     = "10.0.0.0/16"
 }
 
 module "tailscale_key" {
@@ -161,7 +220,7 @@ module "tailscale_key" {
 
 module "talos" {
   source   = "./modules/talos"
-  for_each = var.clusters
+  for_each = local.talos_clusters
 
   cluster_name       = each.key
   cluster_id         = each.value.cluster_id
@@ -170,7 +229,8 @@ module "talos" {
   control_planes     = each.value.control_planes
   workers            = each.value.workers
   network            = var.network
-  cilium             = var.cilium
+  cilium             = local.cilium_effective
+  cilium_version     = local.cilium_version
 
   tailscale_enabled  = var.tailscale.enabled
   tailscale_auth_key = var.tailscale.enabled ? module.tailscale_key[0].auth_key : ""
@@ -178,18 +238,25 @@ module "talos" {
 
   dns_enabled = var.dns.enabled
   dns_domain  = var.dns.domain
+
+  clustermesh_service_type = local.clustermesh_service_type
+
+  hcloud_token = length([for cp in each.value.control_planes : cp if cp.provider == "hetzner"]) > 0 ? local.effective_hcloud_token : ""
+  hcloud_network_id = length([for cp in each.value.control_planes : cp if cp.provider == "hetzner"]) > 0 ? hcloud_network.cluster[each.key].id : null
+
+  hetzner_loadbalancer_enabled = var.hetzner.loadbalancer_enabled
 }
 
 locals {
   cluster_hetzner_nodes = {
-    for k, v in var.clusters : k => {
+    for k, v in local.talos_clusters : k => {
       control_planes = [for cp in v.control_planes : cp if cp.provider == "hetzner"]
       workers        = [for w in v.workers : w if w.provider == "hetzner"]
     }
   }
 
   cluster_gcp_nodes = {
-    for k, v in var.clusters : k => {
+    for k, v in local.talos_clusters : k => {
       control_planes = [for cp in v.control_planes : cp if cp.provider == "gcp"]
       workers        = [for w in v.workers : w if w.provider == "gcp"]
       gcp_config     = try(v.gcp, {})
@@ -202,6 +269,7 @@ module "hetzner" {
   for_each = { for k, v in local.cluster_hetzner_nodes : k => v if length(v.control_planes) > 0 || length(v.workers) > 0 }
 
   cluster_name          = each.key
+  network_id            = hcloud_network.cluster[each.key].id
   control_planes        = each.value.control_planes
   workers               = each.value.workers
   ssh_public_key        = tls_private_key.ssh.public_key_openssh
@@ -211,6 +279,7 @@ module "hetzner" {
   control_plane_configs = { for cp in each.value.control_planes : cp.name => module.talos[each.key].control_plane_configs[cp.name] }
   worker_configs        = { for w in each.value.workers : w.name => module.talos[each.key].worker_configs[w.name] }
 }
+
 
 module "gcp" {
   source   = "./modules/providers/gcp"
@@ -231,34 +300,89 @@ module "gcp" {
   worker_configs        = { for w in each.value.workers : w.name => module.talos[each.key].worker_configs[w.name] }
 }
 
+module "gke" {
+  source   = "./modules/providers/gcp/gke"
+  for_each = local.gke_clusters
+
+  cluster_name   = each.key
+  cluster_id     = each.value.cluster_id
+  project_id     = each.value.gcp.project_id
+  region         = each.value.gcp.region
+  zone           = each.value.gcp.zone
+  network        = try(each.value.gcp.network, "default")
+  subnetwork     = try(each.value.gcp.subnetwork, "")
+  node_pools     = try(each.value.gcp.node_pools, [])
+  pod_cidr       = try(each.value.gcp.pod_cidr, "")
+  services_cidr  = try(each.value.gcp.services_cidr, "")
+  master_ipv4_cidr_block = try(each.value.gcp.master_ipv4_cidr_block, "172.16.0.0/28")
+  enable_private_cluster = try(each.value.gcp.enable_private_cluster, true)
+  master_authorized_networks = try(each.value.gcp.master_authorized_networks, [])
+
+  cilium = local.cilium_effective
+  cilium_version = local.cilium_version
+
+  deletion_protection = try(each.value.gcp.deletion_protection, false)
+}
+
 locals {
   cluster_control_plane_ips = {
     for cluster_name, cluster in var.clusters : cluster_name => merge(
-      length(local.cluster_hetzner_nodes[cluster_name].control_planes) > 0 ? module.hetzner[cluster_name].control_plane_ips : {},
-      length(local.cluster_gcp_nodes[cluster_name].control_planes) > 0 ? module.gcp[cluster_name].control_plane_ips : {}
+      length(lookup(local.cluster_hetzner_nodes, cluster_name, { control_planes = [], workers = [] }).control_planes) > 0 ? module.hetzner[cluster_name].control_plane_ips : {},
+      length(lookup(local.cluster_gcp_nodes, cluster_name, { control_planes = [], workers = [] }).control_planes) > 0 ? module.gcp[cluster_name].control_plane_ips : {},
+      lookup(local.gke_clusters, cluster_name, null) != null ? { "${cluster_name}-gke" = module.gke[cluster_name].cluster_endpoint } : {}
     )
   }
 
   cluster_worker_ips = {
     for cluster_name, cluster in var.clusters : cluster_name => merge(
-      length(local.cluster_hetzner_nodes[cluster_name].workers) > 0 ? module.hetzner[cluster_name].worker_ips : {},
-      length(local.cluster_gcp_nodes[cluster_name].workers) > 0 ? module.gcp[cluster_name].worker_ips : {}
+      length(lookup(local.cluster_hetzner_nodes, cluster_name, { control_planes = [], workers = [] }).workers) > 0 ? module.hetzner[cluster_name].worker_ips : {},
+      length(lookup(local.cluster_gcp_nodes, cluster_name, { control_planes = [], workers = [] }).workers) > 0 ? module.gcp[cluster_name].worker_ips : {}
     )
   }
+
+  cluster_control_plane_ipv6s = {
+    for cluster_name, cluster in var.clusters : cluster_name => merge(
+      length(lookup(local.cluster_hetzner_nodes, cluster_name, { control_planes = [], workers = [] }).control_planes) > 0 ? module.hetzner[cluster_name].control_plane_ipv6s : {},
+    )
+  }
+
+  cluster_worker_ipv6s = {
+    for cluster_name, cluster in var.clusters : cluster_name => merge(
+      length(lookup(local.cluster_hetzner_nodes, cluster_name, { control_planes = [], workers = [] }).workers) > 0 ? module.hetzner[cluster_name].worker_ipv6s : {},
+    )
+  }
+
+  all_control_plane_ipv6s = merge(values(local.cluster_control_plane_ipv6s)...)
+  all_worker_ipv6s        = merge(values(local.cluster_worker_ipv6s)...)
 
   cluster_install_complete = {
     for cluster_name, cluster in var.clusters : cluster_name => concat(
-      length(local.cluster_hetzner_nodes[cluster_name].control_planes) > 0 || length(local.cluster_hetzner_nodes[cluster_name].workers) > 0 ? module.hetzner[cluster_name].install_complete : [],
-      length(local.cluster_gcp_nodes[cluster_name].control_planes) > 0 || length(local.cluster_gcp_nodes[cluster_name].workers) > 0 ? module.gcp[cluster_name].install_complete : []
+      length(lookup(local.cluster_hetzner_nodes, cluster_name, { control_planes = [], workers = [] }).control_planes) > 0 || length(lookup(local.cluster_hetzner_nodes, cluster_name, { control_planes = [], workers = [] }).workers) > 0 ? module.hetzner[cluster_name].install_complete : [],
+      length(lookup(local.cluster_gcp_nodes, cluster_name, { control_planes = [], workers = [] }).control_planes) > 0 || length(lookup(local.cluster_gcp_nodes, cluster_name, { control_planes = [], workers = [] }).workers) > 0 ? module.gcp[cluster_name].install_complete : [],
+      lookup(local.gke_clusters, cluster_name, null) != null ? module.gke[cluster_name].install_complete : []
     )
   }
 
-  all_control_plane_ips = merge(values(local.cluster_control_plane_ips)...)
-  all_worker_ips        = merge(values(local.cluster_worker_ips)...)
+  all_control_plane_ips   = merge(values(local.cluster_control_plane_ips)...)
+  all_worker_ips          = merge(values(local.cluster_worker_ips)...)
+
+  all_kubeconfigs = merge(
+    { for k, v in local.talos_clusters : k => talos_cluster_kubeconfig.this[k].kubeconfig_raw },
+    { for k, v in local.gke_clusters : k => module.gke[k].kubeconfig }
+  )
+
+  # First control plane Tailscale IP per cluster, for patching kubeconfig server URLs locally
+  cluster_control_plane_tailscale_ips = var.tailscale.enabled ? {
+    for cluster_name in keys(var.clusters) : cluster_name => values({
+      for node_key, ip in module.tailscale_devices[0].all_node_ips :
+      node_key => ip
+      if startswith(node_key, "${cluster_name}-")
+    })[0]
+  } : {}
 }
 
 resource "talos_machine_bootstrap" "this" {
-  for_each = { for k, v in var.clusters : k => v if length(v.control_planes) > 0 }
+  for_each = { for k, v in local.talos_clusters : k => v if length(v.control_planes) > 0 }
 
   client_configuration = module.talos[each.key].client_configuration
   node                 = values(local.cluster_control_plane_ips[each.key])[0]
@@ -269,10 +393,11 @@ resource "talos_machine_bootstrap" "this" {
 
 resource "talos_machine_configuration_apply" "control_plane" {
   for_each = merge([
-    for cluster_name, cluster in var.clusters : {
+    for cluster_name, cluster in local.talos_clusters : {
       for cp in cluster.control_planes : "${cluster_name}-${cp.name}" => {
         cluster_name = cluster_name
         node_name    = cp.name
+        provider     = try(cp.provider, "")
       }
     }
   ]...)
@@ -282,15 +407,28 @@ resource "talos_machine_configuration_apply" "control_plane" {
   node                        = local.cluster_control_plane_ips[each.value.cluster_name][each.value.node_name]
   endpoint                    = local.cluster_control_plane_ips[each.value.cluster_name][each.value.node_name]
 
+  config_patches = each.value.provider == "hetzner" ? [
+    jsonencode({
+      machine = {
+        kubelet = {
+          extraArgs = {
+            provider-id = module.hetzner[each.value.cluster_name].control_plane_provider_ids[each.value.node_name]
+          }
+        }
+      }
+    })
+  ] : []
+
   depends_on = [talos_machine_bootstrap.this]
 }
 
 resource "talos_machine_configuration_apply" "worker" {
   for_each = merge([
-    for cluster_name, cluster in var.clusters : {
+    for cluster_name, cluster in local.talos_clusters : {
       for w in cluster.workers : "${cluster_name}-${w.name}" => {
         cluster_name = cluster_name
         node_name    = w.name
+        provider     = try(w.provider, "")
       }
     }
   ]...)
@@ -300,11 +438,23 @@ resource "talos_machine_configuration_apply" "worker" {
   node                        = local.cluster_worker_ips[each.value.cluster_name][each.value.node_name]
   endpoint                    = local.cluster_worker_ips[each.value.cluster_name][each.value.node_name]
 
+  config_patches = each.value.provider == "hetzner" ? [
+    jsonencode({
+      machine = {
+        kubelet = {
+          extraArgs = {
+            provider-id = module.hetzner[each.value.cluster_name].worker_provider_ids[each.value.node_name]
+          }
+        }
+      }
+    })
+  ] : []
+
   depends_on = [talos_machine_configuration_apply.control_plane]
 }
 
 resource "talos_cluster_kubeconfig" "this" {
-  for_each = { for k, v in var.clusters : k => v if length(v.control_planes) > 0 }
+  for_each = { for k, v in local.talos_clusters : k => v if length(v.control_planes) > 0 }
 
   client_configuration = module.talos[each.key].client_configuration
   node                 = values(local.cluster_control_plane_ips[each.key])[0]
@@ -314,7 +464,7 @@ resource "talos_cluster_kubeconfig" "this" {
 }
 
 data "talos_client_configuration" "this" {
-  for_each = var.clusters
+  for_each = local.talos_clusters
 
   cluster_name         = each.key
   client_configuration = module.talos[each.key].client_configuration
@@ -324,7 +474,7 @@ data "talos_client_configuration" "this" {
 
 module "k8s_cleanup" {
   source   = "./modules/k8s"
-  for_each = var.clusters
+  for_each = local.talos_clusters
 
   cluster_name   = each.key
   workers        = each.value.workers
@@ -336,7 +486,8 @@ module "tailscale_devices" {
   source = "./modules/tailscale"
   count  = var.tailscale.enabled ? 1 : 0
 
-  clusters            = { for k, v in var.clusters : k => { control_planes = v.control_planes, workers = v.workers } }
+  clusters            = { for k, v in local.talos_clusters : k => { control_planes = v.control_planes, workers = v.workers } }
+  gke_clusters        = []
   cluster_install_complete = local.cluster_install_complete
   tag                 = var.tailscale.tag
   tailnet             = var.tailscale.tailnet
@@ -357,17 +508,25 @@ module "dns" {
   cluster_worker_ips      = local.cluster_worker_ips
   tailscale_ips           = var.tailscale.enabled ? module.tailscale_devices[0].all_node_ips : {}
 
-  depends_on = [talos_machine_bootstrap.this]
+  depends_on = [talos_machine_bootstrap.this, module.gke]
 }
 
 module "clustermesh" {
   source = "./modules/clustermesh"
   count  = var.cilium.clustermesh && length(var.clusters) > 1 ? 1 : 0
 
-  cluster_names       = keys(var.clusters)
-  cluster_ids         = { for k, v in var.clusters : k => v.cluster_id }
-  kubeconfigs         = { for k, v in var.clusters : k => talos_cluster_kubeconfig.this[k].kubeconfig_raw }
-  control_plane_ips   = local.cluster_control_plane_ips
+  cluster_names                = keys(var.clusters)
+  kubeconfigs                  = local.all_kubeconfigs
+  control_plane_tailscale_ips  = local.cluster_control_plane_tailscale_ips
 
-  depends_on = [talos_cluster_kubeconfig.this, talos_machine_configuration_apply.control_plane]
+  depends_on = [
+    talos_cluster_kubeconfig.this,
+    talos_machine_configuration_apply.control_plane,
+    module.gke,
+    module.dns
+  ]
+}
+
+output "wireguard_warning" {
+  value = local.has_private_gke && var.cilium.clustermesh ? "INFO: GKE private clusters detected. Cross-cluster WireGuard tunnels will not work for private GKE nodes (behind NAT). In-cluster encryption works normally. ClusterMesh will use mTLS for cross-cluster auth." : null
 }

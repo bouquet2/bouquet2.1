@@ -54,6 +54,9 @@ variable "cilium" {
     ipam_mode              = optional(string)
     clustermesh            = optional(bool, false)
     gateway_api            = optional(bool, false)
+    encryption_enabled     = optional(bool, false)
+    encryption_type        = optional(string, "wireguard")
+    node_encryption        = optional(bool, false)
   })
   default = {}
 }
@@ -83,3 +86,34 @@ variable "dns_domain" {
   type    = string
   default = ""
 }
+
+variable "clustermesh_service_type" {
+  type        = string
+  default     = "NodePort"
+  description = "Service type for Cilium ClusterMesh API server (NodePort or LoadBalancer)"
+}
+
+variable "cilium_version" {
+  type        = string
+  description = "Cilium Helm chart version to install (e.g. 1.17.3)"
+}
+
+variable "hcloud_token" {
+  type        = string
+  sensitive   = true
+  default     = ""
+  description = "Hetzner Cloud API token (required for hcloud-cloud-controller-manager)"
+}
+
+variable "hcloud_network_id" {
+  type        = number
+  default     = null
+  description = "Hetzner Cloud network ID for load balancer traffic (optional)"
+}
+
+variable "hetzner_loadbalancer_enabled" {
+  type        = bool
+  default     = false
+  description = "When true, deploy hcloud-ccm to provision Hetzner Cloud LoadBalancers for type:LoadBalancer services"
+}
+

@@ -54,17 +54,39 @@ locals {
       proxy = {
         disabled = true
       }
-      inlineManifests = [
-        {
-          name     = "cilium-install"
-          contents = templatefile("${path.module}/templates/cilium.yaml", {
-            cluster_id          = var.cluster_id
-            cluster_name        = var.cluster_name
-            clustermesh_enabled = var.cilium.clustermesh ? "--set clustermesh.useAPIServer=true --set clustermesh.config.enabled=true" : ""
-            gateway_api_enabled = var.cilium.gateway_api ? "--set gatewayAPI.enabled=true" : ""
-          })
-        }
-      ]
+      inlineManifests = concat(
+        [
+          {
+            name     = "cilium-install"
+            contents = templatefile("${path.module}/templates/cilium.yaml", {
+              cluster_id             = var.cluster_id
+              cluster_name           = var.cluster_name
+              cilium_version         = var.cilium_version
+              clustermesh_enabled    = var.cilium.clustermesh ? "--set clustermesh.useAPIServer=true --set clustermesh.config.enabled=true --set clustermesh.apiserver.service.type=${var.clustermesh_service_type}" : ""
+              gateway_api_enabled    = var.cilium.gateway_api ? join(" ", [
+                "--set gatewayAPI.enabled=true",
+                "--set gatewayAPI.hostNetwork.enabled=true",
+                "--set envoy.securityContext.capabilities.keepCapNetBindService=true",
+                "--set envoy.securityContext.capabilities.envoy={NET_ADMIN,SYS_ADMIN,NET_BIND_SERVICE}",
+              ]) : ""
+              encryption_flags       = var.cilium.encryption_enabled ? join(" ", [
+                "--set encryption.enabled=true",
+                "--set encryption.type=${var.cilium.encryption_type}",
+                "--set encryption.nodeEncryption=${var.cilium.node_encryption}",
+              ]) : ""
+            })
+          }
+        ],
+        var.hcloud_token != "" && var.hetzner_loadbalancer_enabled ? [
+          {
+            name     = "hcloud-ccm"
+            contents = templatefile("${path.module}/templates/hcloud-ccm.yaml", {
+              hcloud_token      = var.hcloud_token
+              hcloud_network_id = var.hcloud_network_id != null ? tostring(var.hcloud_network_id) : ""
+            })
+          }
+        ] : []
+      )
     }
   } : {}
 
@@ -72,6 +94,20 @@ locals {
     machine = {
       network = {
         nameservers = ["100.100.100.100", "1.1.1.1", "8.8.8.8"]
+        interfaces = [
+          {
+            interface = "tailscale0"
+            routes = [
+              {
+                # Route the entire Tailscale CGNAT range via tailscale0 in the main
+                # routing table so that Cilium (which bypasses ip rule policy routing)
+                # can forward pod traffic to Tailscale peers on other clusters.
+                network = "100.64.0.0/10"
+                metric  = 100
+              }
+            ]
+          }
+        ]
       }
       sysctls = {
         "net.ipv4.ip_forward"          = "1"
@@ -100,11 +136,11 @@ data "talos_machine_configuration" "control_plane" {
       apiVersion = "v1alpha1"
       kind       = "ExtensionServiceConfig"
       name       = "tailscale"
-      environment = [
+      environment = concat([
         "TS_AUTHKEY=${var.tailscale_auth_key}",
         "TS_HOSTNAME=${var.cluster_name}-${each.key}",
         "TS_ACCEPT_DNS=true"
-      ]
+      ], length(var.tailscale_routes) > 0 ? ["TS_ROUTES=${join(",", var.tailscale_routes)}"] : [])
     }) : null
   ])
 }
@@ -127,12 +163,11 @@ data "talos_machine_configuration" "worker" {
       apiVersion = "v1alpha1"
       kind       = "ExtensionServiceConfig"
       name       = "tailscale"
-      environment = [
+      environment = concat([
         "TS_AUTHKEY=${var.tailscale_auth_key}",
         "TS_HOSTNAME=${var.cluster_name}-${each.key}",
-        "TS_ACCEPT_DNS=true",
-        "TS_ROUTES=${join(",", var.tailscale_routes)}"
-      ]
+        "TS_ACCEPT_DNS=true"
+      ], length(var.tailscale_routes) > 0 ? ["TS_ROUTES=${join(",", var.tailscale_routes)}"] : [])
     }) : null
   ])
 }

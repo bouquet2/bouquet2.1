@@ -42,6 +42,14 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.0"
     }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.12"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.5"
+    }
     onepassword = {
       source  = "1Password/onepassword"
       version = "~> 3.2"

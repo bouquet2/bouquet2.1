@@ -2,6 +2,20 @@ locals {
   latest_ubuntu = "ubuntu-24.04"
 }
 
+resource "hcloud_server_network" "control_plane" {
+  for_each = { for cp in var.control_planes : cp.name => cp }
+
+  server_id  = hcloud_server.control_plane[each.key].id
+  network_id = var.network_id
+}
+
+resource "hcloud_server_network" "worker" {
+  for_each = { for w in var.workers : w.name => w }
+
+  server_id  = hcloud_server.worker[each.key].id
+  network_id = var.network_id
+}
+
 resource "hcloud_ssh_key" "cluster" {
   name       = "${var.cluster_name}-ssh-key"
   public_key = var.ssh_public_key
@@ -61,6 +75,26 @@ resource "hcloud_firewall" "cluster" {
     direction = "in"
     protocol  = "udp"
     port      = "51871"
+    source_ips = [
+      "0.0.0.0/0",
+      "::/0"
+    ]
+  }
+
+  rule {
+    direction = "in"
+    protocol  = "tcp"
+    port      = "80"
+    source_ips = [
+      "0.0.0.0/0",
+      "::/0"
+    ]
+  }
+
+  rule {
+    direction = "in"
+    protocol  = "tcp"
+    port      = "443"
     source_ips = [
       "0.0.0.0/0",
       "::/0"
