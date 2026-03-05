@@ -29,7 +29,9 @@ variable "lb_subdomain" {
 }
 
 data "cloudflare_zone" "this" {
-  name = var.domain
+  filter = {
+    name = var.domain
+  }
 }
 
 locals {
@@ -38,10 +40,10 @@ locals {
   all_node_ips          = merge(local.all_control_plane_ips, local.all_worker_ips)
 }
 
-resource "cloudflare_record" "control_plane_api_global" {
+resource "cloudflare_dns_record" "control_plane_api_global" {
   for_each = local.all_control_plane_ips
 
-  zone_id = data.cloudflare_zone.this.id
+  zone_id = data.cloudflare_zone.this.zone_id
   name    = "control-planes.internal"
   type    = "A"
   ttl     = 300
@@ -49,7 +51,7 @@ resource "cloudflare_record" "control_plane_api_global" {
   proxied = false
 }
 
-resource "cloudflare_record" "control_plane_api_cluster" {
+resource "cloudflare_dns_record" "control_plane_api_cluster" {
   for_each = merge([
     for cluster_name, ips in var.cluster_control_plane_ips : {
       for node_name, ip in ips : "${cluster_name}-${node_name}" => {
@@ -60,7 +62,7 @@ resource "cloudflare_record" "control_plane_api_cluster" {
     }
   ]...)
 
-  zone_id = data.cloudflare_zone.this.id
+  zone_id = data.cloudflare_zone.this.zone_id
   name    = "control-planes.${each.value.cluster_name}.internal"
   type    = "A"
   content = lookup(var.tailscale_ips, "${each.value.cluster_name}-${each.value.node_name}", each.value.ip)
@@ -68,10 +70,10 @@ resource "cloudflare_record" "control_plane_api_cluster" {
   proxied = false
 }
 
-resource "cloudflare_record" "worker_global" {
+resource "cloudflare_dns_record" "worker_global" {
   for_each = local.all_worker_ips
 
-  zone_id = data.cloudflare_zone.this.id
+  zone_id = data.cloudflare_zone.this.zone_id
   name    = "workers.internal"
   type    = "A"
   content = lookup(var.tailscale_ips, each.key, each.value)
@@ -79,7 +81,7 @@ resource "cloudflare_record" "worker_global" {
   proxied = false
 }
 
-resource "cloudflare_record" "worker_cluster" {
+resource "cloudflare_dns_record" "worker_cluster" {
   for_each = merge([
     for cluster_name, ips in var.cluster_worker_ips : {
       for node_name, ip in ips : "${cluster_name}-${node_name}" => {
@@ -90,7 +92,7 @@ resource "cloudflare_record" "worker_cluster" {
     }
   ]...)
 
-  zone_id = data.cloudflare_zone.this.id
+  zone_id = data.cloudflare_zone.this.zone_id
   name    = "workers.${each.value.cluster_name}.internal"
   type    = "A"
   content = lookup(var.tailscale_ips, "${each.value.cluster_name}-${each.value.node_name}", each.value.ip)
@@ -98,7 +100,7 @@ resource "cloudflare_record" "worker_cluster" {
   proxied = false
 }
 
-resource "cloudflare_record" "node_internal" {
+resource "cloudflare_dns_record" "node_internal" {
   for_each = merge([
     for cluster_name, cluster in {
       for cn, ips in var.cluster_control_plane_ips : cn => {
@@ -115,7 +117,7 @@ resource "cloudflare_record" "node_internal" {
     }
   ]...)
 
-  zone_id = data.cloudflare_zone.this.id
+  zone_id = data.cloudflare_zone.this.zone_id
   name    = "${each.value.node_name}.${each.value.cluster_name}.internal"
   type    = "A"
   content = lookup(var.tailscale_ips, each.key, each.value.ip)
@@ -123,10 +125,10 @@ resource "cloudflare_record" "node_internal" {
   proxied = false
 }
 
-resource "cloudflare_record" "lb" {
+resource "cloudflare_dns_record" "lb" {
   for_each = local.all_node_ips
 
-  zone_id = data.cloudflare_zone.this.id
+  zone_id = data.cloudflare_zone.this.zone_id
   name    = var.lb_subdomain
   type    = "A"
   content = each.value
