@@ -32,6 +32,8 @@ Thumbs.db
 # Generated files
 modules/providers/gke/generated/
 .terragrunt-cache/
+providers_optional.tf
+secrets_optional.tf
 
 # Secrets
 secret.tfvars

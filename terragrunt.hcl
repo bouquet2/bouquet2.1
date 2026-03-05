@@ -1,6 +1,4 @@
 terraform {
-  source = "."
-
   extra_arguments "config" {
     commands = get_terraform_commands_that_need_vars()
 
@@ -44,7 +42,7 @@ locals {
 # they are actually needed.
 generate "providers_optional" {
   path      = "providers_optional.tf"
-  if_exists = "overwrite_terragrunt"
+  if_exists = "overwrite"
 
   contents = <<-EOF
 %{if local.has_gcp}
@@ -59,7 +57,7 @@ EOF
 
 generate "secrets_optional" {
   path      = "secrets_optional.tf"
-  if_exists = "overwrite_terragrunt"
+  if_exists = "overwrite"
 
   contents = <<-EOF
 %{if local.enable_onepassword}
