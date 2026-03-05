@@ -26,6 +26,7 @@ A fresh take on [bouquet2](https://github.com/bouquet2/bouquet2) based on the mi
 * Supports multiple Cloud providers
   * GCP and Hetzner currently supported, AWS is coming soon(tm)
 * Automatically gets the latest Kubernetes and Talos Linux version for the cluster
+* Dynamic provider initialization via Terragrunt — Google and 1Password providers are only loaded when actually needed
 
 ## Setup
 
@@ -43,50 +44,16 @@ A fresh take on [bouquet2](https://github.com/bouquet2/bouquet2) based on the mi
     * `roles/compute.admin` - Manage compute instances, images, and firewalls
     * `roles/storage.admin` - Manage GCS buckets for Talos images
     * `roles/iam.serviceAccountUser` - Required if using service accounts on instances
-  * Or create a custom role with these permissions:
-    ```json
-    {
-      "permissions": [
-        "compute.instances.create",
-        "compute.instances.delete",
-        "compute.instances.get",
-        "compute.instances.list",
-        "compute.instances.start",
-        "compute.instances.stop",
-        "compute.instances.update",
-        "compute.images.create",
-        "compute.images.delete",
-        "compute.images.get",
-        "compute.images.list",
-        "compute.firewalls.create",
-        "compute.firewalls.delete",
-        "compute.firewalls.get",
-        "compute.firewalls.list",
-        "compute.firewalls.update",
-        "compute.networks.get",
-        "compute.networks.list",
-        "compute.subnetworks.get",
-        "compute.subnetworks.list",
-        "storage.buckets.create",
-        "storage.buckets.delete",
-        "storage.buckets.get",
-        "storage.buckets.list",
-        "storage.objects.create",
-        "storage.objects.delete",
-        "storage.objects.get",
-        "storage.objects.list"
-      ]
-    }
-    ```
 
 #### Software
 * [OpenTofu](https://opentofu.org)
+* [Terragrunt](https://terragrunt.gruntwork.io)
 * [kubectl](https://kubernetes.io/docs/tasks/tools/)
 * [talosctl](https://www.talos.dev/v1.9/introduction/quickstart/#talosctl)
 
 #### Credentials
 * [Tailscale OAuth Secret and ID with RW on devices:core, auth_keys, acl](https://tailscale.com/docs/features/oauth-clients)
-  * If you don't enable `manage_acl` you will have to add the required role and ACL yourself.
+  * If you don't enable `manage_acl` you will have to add the required role and ACL yourself.
 * [Hetzner Console API key](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
 * [GCP Application Default Credentials](https://cloud.google.com/docs/authentication/provide-credentials-adc) - Run `gcloud auth application-default login`
 * [Cloudflare API key with Zone.DNS Edit permission](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)
@@ -94,48 +61,66 @@ A fresh take on [bouquet2](https://github.com/bouquet2/bouquet2) based on the mi
 
 ### Setup
 
+#### Config file
+
+```bash
+cp config.json.example config.json
+vim config.json
+```
+
+Multiple configs are supported via the `B_CFG` environment variable:
+
+```bash
+# Default: reads config.json
+terragrunt plan
+
+# Alternate config
+B_CFG=config2.json terragrunt plan
+```
+
 #### Secrets (choose one method)
 
-**Option 1: 1Password (default)**
-
-Secrets are fetched from 1Password automatically when no `-var-file=secrets.tfvars` is provided.
-
-1. Enable "Integrate with other apps" in the 1Password desktop app
-   (Settings > Developer > Integrate with the 1Password SDKs)
-2. Set your 1Password account name (as shown in the app sidebar) either:
-   - In `terraform.tfvars.json`: `"onepassword_account": "your-account-name"`
-   - Or via environment variable: `export OP_ACCOUNT="your-account-name"`
-3. Create items in your "Infrastructure" vault (only the ones you use):
-   - `bouquet-hcloud-token` — Hetzner Cloud API token (password field)
-   - `bouquet-cloudflare-api-token` — Cloudflare API token (password field)
-   - `bouquet-tailscale-oauth-secret` — Tailscale OAuth secret (if using Tailscale)
-   - `bouquet-tailscale-oauth-client-id` — Tailscale OAuth client ID (if using Tailscale)
-   - `bouquet-gcp-credentials` — GCP service account JSON (if using GCP)
-
-**Option 2: secrets.tfvars (fallback)**
+**Option 1: secrets.tfvars (default)**
 
 ```bash
 cp secrets.tfvars.example secrets.tfvars
 vim secrets.tfvars  # add your secrets
 ```
 
+**Option 2: 1Password**
+
+Set `enable_onepassword = true` in your `config.json` and provide your account:
+
+```json
+{
+  "enable_onepassword": true,
+  "onepassword_account": "your-account.1password.com"
+}
+```
+
+1. Enable "Integrate with other apps" in the 1Password desktop app
+   (Settings > Developer > Integrate with the 1Password SDKs)
+2. Create items in your vault (default: `Infrastructure`):
+   - `bouquet-hcloud-token` — Hetzner Cloud API token (password field)
+   - `bouquet-cloudflare-api-token` — Cloudflare API token (password field)
+   - `bouquet-tailscale-oauth-secret` — Tailscale OAuth secret (if using Tailscale)
+   - `bouquet-tailscale-oauth-client-id` — Tailscale OAuth client ID (if using Tailscale)
+
 #### Deploy
 
 ```bash
-cp terraform.tfvars.json.example terraform.tfvars.json
-vim terraform.tfvars.json
+# Default config (config.json) + secrets.tfvars auto-loaded
+terragrunt init
+terragrunt plan
+terragrunt apply
 
-# With 1Password (secrets fetched automatically):
-tofu init
-tofu plan -var-file=terraform.tfvars.json
-tofu apply -var-file=terraform.tfvars.json
-
-# With secrets.tfvars:
-tofu plan -var-file=terraform.tfvars.json -var-file=secrets.tfvars
-tofu apply -var-file=terraform.tfvars.json -var-file=secrets.tfvars
+# Alternate config
+B_CFG=config2.json terragrunt plan
+B_CFG=config2.json terragrunt apply
 
 # Destroying the cluster
-tofu destroy -var-file=terraform.tfvars.json
+terragrunt destroy
+B_CFG=config2.json terragrunt destroy
 ```
 
 
@@ -221,3 +206,4 @@ GNU Affero General Public License for more details.
 
 You should have received a copy of the GNU Affero General Public License
 along with bouquet2.1.  If not, see <https://www.gnu.org/licenses/>.
+

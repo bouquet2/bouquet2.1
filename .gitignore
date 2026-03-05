@@ -4,8 +4,12 @@
 *.tfstate.*
 *.tfvars
 *.tfvars.*
+config*.json.*
+config*.json
 !*.tfvars.example
 !*.tfvars.*.example
+!config.json.*.example
+!config.json.example
 crash.log
 crash.*.log
 override.tf
@@ -27,8 +31,10 @@ Thumbs.db
 
 # Generated files
 modules/providers/gke/generated/
+.terragrunt-cache/
 
 # Secrets
+secret.tfvars
 secrets.tfvars
 *.pem
 *.key

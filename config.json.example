@@ -1,0 +1,142 @@
+{
+  "enable_onepassword": false,
+  "onepassword_account": null,
+  "onepassword_vault": "Infrastructure",
+  "clusters": {
+    "hetzner": {
+      "cluster_id": 1,
+      "control_planes": [
+        {
+          "name": "rose",
+          "provider": "hetzner",
+          "server_type": "cx23",
+          "location": "hel1",
+          "install_disk": "/dev/sda"
+        }
+      ],
+      "workers": [
+        {
+          "name": "tulip",
+          "provider": "hetzner",
+          "server_type": "cx23",
+          "location": "hel1",
+          "install_disk": "/dev/sda"
+        }
+      ]
+    },
+    "gcp": {
+      "cluster_id": 2,
+      "control_planes": [
+        {
+          "name": "lily",
+          "provider": "gcp",
+          "machine_type": "e2-standard-2",
+          "disk_size": 50
+        }
+      ],
+      "workers": [
+        {
+          "name": "orchid",
+          "provider": "gcp",
+          "machine_type": "e2-standard-2",
+          "disk_size": 50
+        }
+      ],
+      "gcp": {
+        "project_id": "project-id",
+        "region": "us-central1",
+        "zone": "us-central1-a",
+        "network": "default"
+      }
+    },
+    "gke-prod": {
+      "type": "gke",
+      "cluster_id": 3,
+      "control_planes": [],
+      "workers": [],
+      "gcp": {
+        "project_id": "project-id",
+        "region": "us-central1",
+        "zone": "us-central1-a",
+        "network": "default",
+        "node_pools": [
+          {
+            "name": "default-pool",
+            "machine_type": "e2-standard-4",
+            "min_count": 1,
+            "max_count": 3,
+            "disk_size_gb": 50
+          }
+        ],
+        "pod_cidr": "10.248.0.0/14",
+        "services_cidr": "10.100.0.0/20",
+        "master_ipv4_cidr_block": "172.16.0.0/28",
+        "enable_private_cluster": true
+      }
+    }
+  },
+  "tailscale": {
+    "enabled": true,
+    "tailnet": "tailnet-id",
+    "tag": "tag:k8s-operator",
+    "manage_acl": false,
+    "routes": [
+      "10.96.0.0/12",
+      "10.244.0.0/16",
+      "10.248.0.0/14",
+      "10.100.0.0/20",
+      "fd00:1::/112",
+      "fd00::/48"
+    ]
+  },
+  "dns": {
+    "enabled": true,
+    "domain": "example.com",
+    "internal_domain": "internal.example.com"
+  },
+  "cilium": {
+    "enabled": true,
+    "kube_proxy_replacement": true,
+    "ipam_mode": "kubernetes",
+    "clustermesh": true,
+    "gateway_api": false
+  },
+  "network": {
+    "pod_subnets": [
+      "10.244.0.0/16",
+      "fd00::/48"
+    ],
+    "service_subnets": [
+      "10.96.0.0/12",
+      "fd00:1::/112"
+    ]
+  },
+  "ceph": {
+    "enabled": false,
+    "storage_type": "directory",
+    "data_dir": "/var/lib/rook",
+    "device_filter": "",
+    "mon": {
+      "count": 1,
+      "allow_multiple_per_node": true
+    },
+    "mgr": {
+      "count": 1
+    },
+    "dashboard": {
+      "enabled": true,
+      "ssl": false
+    },
+    "cephfs": {
+      "enabled": true,
+      "name": "cephfs",
+      "metadata_pool_replicas": 1,
+      "data_pool_replicas": 1
+    },
+    "storage_classes": {
+      "block": true,
+      "fs": true,
+      "default": "fs"
+    }
+  }
+}

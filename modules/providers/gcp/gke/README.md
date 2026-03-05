@@ -47,24 +47,36 @@ Cilium requires all clusters in a ClusterMesh to have WireGuard encryption enabl
 
 ## Configuration
 
-```hcl
-gcp = {
-  project_id              = "my-project-id"
-  region                  = "us-central1"
-  zone                    = "us-central1-a"
-  network                 = "default"           # Optional: existing VPC
-  subnetwork              = ""                  # Optional: existing subnet
-  enable_private_cluster  = true                # Default: true
-  master_ipv4_cidr_block  = "172.16.0.0/28"     # Master CIDR for private cluster
-  node_pools = [
-    {
-      name          = "default-pool"
-      machine_type  = "e2-standard-2"
-      min_count     = 1
-      max_count     = 3
-      disk_size_gb  = 50
+The Google provider is inherited from the root module — no explicit `providers` pass-through is needed. Set your GCP cluster config in `config.json`:
+
+```json
+{
+  "clusters": {
+    "my-gke": {
+      "type": "gke",
+      "cluster_id": 2,
+      "control_planes": [],
+      "workers": [],
+      "gcp": {
+        "project_id":             "my-project-id",
+        "region":                 "us-central1",
+        "zone":                   "us-central1-a",
+        "network":                "default",
+        "subnetwork":             "",
+        "enable_private_cluster": true,
+        "master_ipv4_cidr_block": "172.16.0.0/28",
+        "node_pools": [
+          {
+            "name":         "default-pool",
+            "machine_type": "e2-standard-2",
+            "min_count":    1,
+            "max_count":    3,
+            "disk_size_gb": 50
+          }
+        ]
+      }
     }
-  ]
+  }
 }
 ```
 
@@ -74,32 +86,6 @@ Service account with these roles:
 - `roles/container.admin` — Manage GKE clusters
 - `roles/compute.networkAdmin` — Manage VPC networks and firewalls
 - `roles/iam.serviceAccountUser` — Required for node pools
-
-## Example
-
-```hcl
-clusters = {
-  gcp = {
-    type       = "gke"
-    cluster_id = 2
-    control_planes = []
-    workers        = []
-    gcp = {
-      project_id = "my-project"
-      region     = "us-central1"
-      zone       = "us-central1-a"
-      node_pools = [
-        {
-          name         = "default-pool"
-          machine_type = "e2-standard-2"
-          min_count    = 1
-          max_count    = 3
-        }
-      ]
-    }
-  }
-}
-```
 
 ## Security
 
@@ -130,6 +116,6 @@ This is expected behavior. Cross-cluster operations still work via mTLS.
 ### WireGuard not working across clusters
 
 If you need full WireGuard mesh:
-1. Disable private cluster: `enable_private_cluster = false`
+1. Disable private cluster: `"enable_private_cluster": false`
 2. Add firewall rule for UDP 51871
 3. Re-apply

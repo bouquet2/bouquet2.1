@@ -34,10 +34,6 @@ terraform {
       source  = "hashicorp/null"
       version = "~> 3.2"
     }
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 7.0"
-    }
     kubernetes = {
       source  = "hashicorp/kubernetes"
       version = "~> 3.0"
@@ -49,6 +45,10 @@ terraform {
     local = {
       source  = "hashicorp/local"
       version = "~> 2.5"
+    }
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
     }
     onepassword = {
       source  = "1Password/onepassword"

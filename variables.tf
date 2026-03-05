@@ -135,14 +135,66 @@ variable "hetzner" {
   default = {}
 }
 
+variable "ceph" {
+  description = "Rook-Ceph storage configuration (per-cluster; set in clusters map or globally here)"
+  type = object({
+    enabled   = optional(bool, false)
+    namespace = optional(string, "rook-ceph")
+
+    storage_type  = optional(string, "directory")
+    data_dir      = optional(string, "/var/lib/rook")
+    device_filter = optional(string, "")
+
+    mon = optional(object({
+      count                = optional(number, 1)
+      allow_multiple_per_node = optional(bool, true)
+    }), {})
+
+    mgr = optional(object({
+      count = optional(number, 1)
+    }), {})
+
+    dashboard = optional(object({
+      enabled = optional(bool, true)
+      ssl     = optional(bool, false)
+    }), {})
+
+    cephfs = optional(object({
+      enabled        = optional(bool, true)
+      name           = optional(string, "cephfs")
+      metadata_pool_replicas = optional(number, 1)
+      data_pool_replicas     = optional(number, 1)
+    }), {})
+
+    storage_classes = optional(object({
+      block   = optional(bool, true)
+      fs      = optional(bool, true)
+      default = optional(string, "fs")
+    }), {})
+  })
+  default = {}
+}
+
+variable "enable_onepassword" {
+  description = "Enable 1Password for secrets (opt-in)"
+  type        = bool
+  default     = false
+}
+
+variable "onepassword_account" {
+  description = "1Password account URL (required if enable_onepassword=true)"
+  type        = string
+  default     = null
+}
+
 variable "onepassword_vault" {
-  description = "1Password vault name for secrets"
+  description = "1Password vault name"
   type        = string
   default     = "Infrastructure"
 }
 
-variable "onepassword_account" {
-  description = "1Password account name (as shown in desktop app sidebar). Alternatively, set OP_ACCOUNT environment variable."
-  type        = string
+variable "enable_gcp" {
+  description = "Enable GCP provider (auto-detected if null)"
+  type        = bool
   default     = null
 }
