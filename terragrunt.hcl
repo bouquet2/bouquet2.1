@@ -37,19 +37,71 @@ locals {
   gcp_zone     = length(local.gcp_clusters) > 0 ? local.gcp_clusters[0].gcp.zone : ""
 }
 
-# Generate the optional providers (google + onepassword) and the secrets
-# module into separate files so that OpenTofu only initialises them when
-# they are actually needed.
-generate "providers_optional" {
-  path      = "providers_optional.tf"
+# Generate GCP modules and provider only when needed.
+# When has_gcp = false, no google provider is required.
+generate "gcp_modules" {
+  path      = "gcp_modules.tf"
   if_exists = "overwrite"
 
   contents = <<-EOF
 %{if local.has_gcp}
+terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = ">= 4.0.0"
+    }
+  }
+}
+
 provider "google" {
   project = "${local.gcp_project}"
   region  = "${local.gcp_region}"
-  zone    = "${local.gcp_zone}"
+}
+
+module "gcp" {
+  source   = "./modules/providers/gcp"
+  for_each = { for k, v in local.cluster_gcp_nodes : k => v if length(v.control_planes) > 0 || length(v.workers) > 0 }
+
+  project_id            = each.value.gcp_config.project_id
+  region                = each.value.gcp_config.region
+  zone                  = each.value.gcp_config.zone
+  network               = try(each.value.gcp_config.network, "default")
+  subnetwork            = try(each.value.gcp_config.subnetwork, "")
+  gcs_bucket            = try(each.value.gcp_config.gcs_bucket, "")
+  cluster_name          = each.key
+  control_planes        = each.value.control_planes
+  workers               = each.value.workers
+  talos_version         = local.talos_version
+  ssh_public_key        = tls_private_key.ssh.public_key_openssh
+  control_plane_configs = { for cp in each.value.control_planes : cp.name => module.talos[each.key].control_plane_configs[cp.name] }
+  worker_configs        = { for w in each.value.workers : w.name => module.talos[each.key].worker_configs[w.name] }
+
+  ceph_disk = try(each.value.gcp_config.ceph_disk, {})
+}
+
+module "gke" {
+  source   = "./modules/providers/gcp/gke"
+  for_each = local.gke_clusters
+
+  cluster_name   = each.key
+  cluster_id     = each.value.cluster_id
+  project_id     = each.value.gcp.project_id
+  region         = each.value.gcp.region
+  zone           = each.value.gcp.zone
+  network        = try(each.value.gcp.network, "default")
+  subnetwork     = try(each.value.gcp.subnetwork, "")
+  node_pools     = try(each.value.gcp.node_pools, [])
+  pod_cidr       = try(each.value.gcp.pod_cidr, "")
+  services_cidr  = try(each.value.gcp.services_cidr, "")
+  master_ipv4_cidr_block = try(each.value.gcp.master_ipv4_cidr_block, "172.16.0.0/28")
+  enable_private_cluster = try(each.value.gcp.enable_private_cluster, true)
+  master_authorized_networks = try(each.value.gcp.master_authorized_networks, [])
+
+  cilium = local.cilium_effective
+  cilium_version = local.cilium_version
+
+  deletion_protection = try(each.value.gcp.deletion_protection, false)
 }
 %{endif}
 EOF

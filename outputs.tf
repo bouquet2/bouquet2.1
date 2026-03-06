@@ -6,11 +6,13 @@ output "kubeconfigs" {
 
 locals {
   cluster_endpoints = merge(
-    # Talos clusters: use Tailscale IP if enabled, otherwise public IP
+    # Talos clusters: use DNS domain if enabled, else Tailscale IP if enabled, else public IP
     { for name in keys(local.talos_clusters) : name =>
-      var.tailscale.enabled && length(module.tailscale_devices) > 0
-        ? values(module.tailscale_devices[0].cluster_node_ips[name])[0]
-        : values(local.cluster_control_plane_ips[name])[0]
+      var.dns.enabled && var.dns.internal_domain != ""
+        ? "control-planes.${name}.${var.dns.internal_domain}"
+        : (var.tailscale.enabled && length(module.tailscale_devices) > 0
+            ? values(module.tailscale_devices[0].cluster_node_ips[name])[0]
+            : values(local.cluster_control_plane_ips[name])[0])
     },
     # GKE clusters: use GKE endpoint directly
     { for name in keys(local.gke_clusters) : name => module.gke[name].cluster_endpoint }
