@@ -34,6 +34,7 @@ modules/providers/gke/generated/
 .terragrunt-cache/
 providers_optional.tf
 secrets_optional.tf
+gcp_modules.tf
 
 # Secrets
 secret.tfvars

@@ -37,8 +37,8 @@ locals {
   gcp_zone     = length(local.gcp_clusters) > 0 ? local.gcp_clusters[0].gcp.zone : ""
 }
 
-# Generate GCP modules and provider only when needed.
-# When has_gcp = false, no google provider is required.
+# Generate GCP provider, modules, and output-aggregating locals only when needed.
+# When has_gcp = false, only empty locals are emitted — no Google provider required.
 generate "gcp_modules" {
   path      = "gcp_modules.tf"
   if_exists = "overwrite"
@@ -84,24 +84,42 @@ module "gke" {
   source   = "./modules/providers/gcp/gke"
   for_each = local.gke_clusters
 
-  cluster_name   = each.key
-  cluster_id     = each.value.cluster_id
-  project_id     = each.value.gcp.project_id
-  region         = each.value.gcp.region
-  zone           = each.value.gcp.zone
-  network        = try(each.value.gcp.network, "default")
-  subnetwork     = try(each.value.gcp.subnetwork, "")
-  node_pools     = try(each.value.gcp.node_pools, [])
-  pod_cidr       = try(each.value.gcp.pod_cidr, "")
-  services_cidr  = try(each.value.gcp.services_cidr, "")
-  master_ipv4_cidr_block = try(each.value.gcp.master_ipv4_cidr_block, "172.16.0.0/28")
-  enable_private_cluster = try(each.value.gcp.enable_private_cluster, true)
+  cluster_name               = each.key
+  cluster_id                 = each.value.cluster_id
+  project_id                 = each.value.gcp.project_id
+  region                     = each.value.gcp.region
+  zone                       = each.value.gcp.zone
+  network                    = try(each.value.gcp.network, "default")
+  subnetwork                 = try(each.value.gcp.subnetwork, "")
+  node_pools                 = try(each.value.gcp.node_pools, [])
+  pod_cidr                   = try(each.value.gcp.pod_cidr, "")
+  services_cidr              = try(each.value.gcp.services_cidr, "")
+  master_ipv4_cidr_block     = try(each.value.gcp.master_ipv4_cidr_block, "172.16.0.0/28")
+  enable_private_cluster     = try(each.value.gcp.enable_private_cluster, true)
   master_authorized_networks = try(each.value.gcp.master_authorized_networks, [])
 
-  cilium = local.cilium_effective
+  cilium         = local.cilium_effective
   cilium_version = local.cilium_version
 
   deletion_protection = try(each.value.gcp.deletion_protection, false)
+}
+
+locals {
+  gcp_cluster_control_plane_ips = { for k, v in module.gcp : k => v.control_plane_ips }
+  gcp_cluster_worker_ips        = { for k, v in module.gcp : k => v.worker_ips }
+  gcp_cluster_install_complete  = { for k, v in module.gcp : k => v.install_complete }
+  gke_cluster_endpoints         = { for k, v in module.gke : k => v.cluster_endpoint }
+  gke_cluster_install_complete  = { for k, v in module.gke : k => v.install_complete }
+  gke_kubeconfigs               = { for k, v in module.gke : k => v.kubeconfig }
+}
+%{else}
+locals {
+  gcp_cluster_control_plane_ips = {}
+  gcp_cluster_worker_ips        = {}
+  gcp_cluster_install_complete  = {}
+  gke_cluster_endpoints         = {}
+  gke_cluster_install_complete  = {}
+  gke_kubeconfigs               = {}
 }
 %{endif}
 EOF

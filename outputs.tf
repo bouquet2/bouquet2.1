@@ -15,7 +15,7 @@ locals {
             : values(local.cluster_control_plane_ips[name])[0])
     },
     # GKE clusters: use GKE endpoint directly
-    { for name in keys(local.gke_clusters) : name => module.gke[name].cluster_endpoint }
+    { for name in keys(local.gke_clusters) : name => lookup(local.gke_cluster_endpoints, name, "") }
   )
 
   kubeconfig_merged = length(var.clusters) > 0 ? yamlencode({
