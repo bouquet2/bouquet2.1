@@ -39,21 +39,78 @@ locals {
 
 # Generate GCP provider, modules, and output-aggregating locals only when needed.
 # When has_gcp = false, only empty locals are emitted — no Google provider required.
+generate "required_providers" {
+  path      = "required_providers_generated.tf"
+  if_exists = "overwrite"
+
+  contents = <<-EOF
+terraform {
+  required_providers {
+    hcloud = {
+      source  = "hetznercloud/hcloud"
+      version = "~> 1.45"
+    }
+    talos = {
+      source  = "siderolabs/talos"
+      version = "~> 0.6"
+    }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 5.0"
+    }
+    tailscale = {
+      source  = "tailscale/tailscale"
+      version = "~> 0.16"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.4"
+    }
+    external = {
+      source  = "hashicorp/external"
+      version = "~> 2.3"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.2"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 3.0"
+    }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 3.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.5"
+    }
+    onepassword = {
+      source  = "1Password/onepassword"
+      version = "~> 3.2"
+    }
+%{if local.has_gcp}
+    google = {
+      source  = "hashicorp/google"
+      version = ">= 4.0.0"
+    }
+%{endif}
+  }
+}
+EOF
+}
+
 generate "gcp_modules" {
   path      = "gcp_modules.tf"
   if_exists = "overwrite"
 
   contents = <<-EOF
 %{if local.has_gcp}
-terraform {
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = ">= 4.0.0"
-    }
-  }
-}
-
 provider "google" {
   project = "${local.gcp_project}"
   region  = "${local.gcp_region}"
