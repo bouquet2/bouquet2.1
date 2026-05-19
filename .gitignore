@@ -1,5 +1,6 @@
 # Terraform
 .terraform/
+secrets.hcl
 *.tfstate
 *.tfstate.*
 *.tfvars
@@ -31,13 +32,21 @@ Thumbs.db
 
 # Generated files
 modules/providers/gke/generated/
+.kubeconfigs
+__pycache__
 .terragrunt-cache/
+.terragrunt-stack/
 providers_optional.tf
 secrets_optional.tf
 gcp_modules.tf
+terragrunt.stack.hcl
+test-stack/
 
 # Secrets
 secret.tfvars
 secrets.tfvars
 *.pem
 *.key
+.versions-cache.json
+.last-config
+modules/clustermesh/terraform.tfvars.json

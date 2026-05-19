@@ -9,14 +9,18 @@ Infinitely scalable, multi-cloud, secure and network-agnostic declarative Kubern
 
 A fresh take on [bouquet2](https://github.com/bouquet2/bouquet2) based on the mistakes learned while managing it.
 
-
 ## Differences compared to bouquet2
+
 * Rewritten from ground-up with LLMs
 * No Kubernetes manifests (yet)
-* Use `null_resource` on OpenTofu instead of doing cleanup with `just`
+* Use Terragrunt Stack pattern instead of manual `live/` directory management
 * Fully Cilium-compliant (fully passes `cilium connectivity test`)
   * Also uses Cilium WireGuard for pod-to-pod communication (node-to-node is handled by Tailscale)
-* Cilium is now managed by in-line manifests entirely
+* Cilium ClusterMesh for multi-cluster service discovery
+* Config-driven cluster definitions via JSON
+* Automated stack unit generation via `main.py`
+* Rook Ceph block/object/file storage provisioned on-cluster
+* Consolidated `modules/infra/` model — providers, Talos, Tailscale, DNS all integrated in one module
 * Custom hooks that allow removal/addition of nodes as well as in-place machineconfig support
 * Custom hook that allows removal of Tailscale nodes automatically (was a drawback on bouquet2)
 * No packer required for setup
@@ -26,7 +30,8 @@ A fresh take on [bouquet2](https://github.com/bouquet2/bouquet2) based on the mi
 * Supports multiple Cloud providers
   * GCP and Hetzner currently supported, AWS is coming soon(tm)
 * Automatically gets the latest Kubernetes and Talos Linux version for the cluster
-* Dynamic provider initialization via Terragrunt — Google and 1Password providers are only loaded when actually needed
+* Hetzner private network with deterministic per-node IP assignment for stable etcd peering
+* Bootstrap depends on machine configuration apply, fixing timing race conditions present in bouquet2
 
 ## Setup
 
@@ -68,23 +73,21 @@ cp config.json.example config.json
 vim config.json
 ```
 
-Multiple configs are supported via the `B_CFG` environment variable:
+Multiple configs are supported via the `--config` argument:
 
 ```bash
-# Default: reads config.json
-terragrunt plan
-
-# Alternate config
-B_CFG=config2.json terragrunt plan
+# Generate stack units from config
+python3 main.py --config config.json
+python3 main.py --config config-gcpha-multicluster.json
 ```
 
 #### Secrets (choose one method)
 
-**Option 1: secrets.tfvars (default)**
+**Option 1: secrets.hcl (default)**
 
 ```bash
-cp secrets.tfvars.example secrets.tfvars
-vim secrets.tfvars  # add your secrets
+cp secrets.hcl.example secrets.hcl
+vim secrets.hcl  # add your secrets
 ```
 
 **Option 2: 1Password**
@@ -98,32 +101,75 @@ Set `enable_onepassword = true` in your `config.json` and provide your account:
 }
 ```
 
-1. Enable "Integrate with other apps" in the 1Password desktop app
-   (Settings > Developer > Integrate with the 1Password SDKs)
-2. Create items in your vault (default: `Infrastructure`):
-   - `bouquet-hcloud-token` — Hetzner Cloud API token (password field)
-   - `bouquet-cloudflare-api-token` — Cloudflare API token (password field)
-   - `bouquet-tailscale-oauth-secret` — Tailscale OAuth secret (if using Tailscale)
-   - `bouquet-tailscale-oauth-client-id` — Tailscale OAuth client ID (if using Tailscale)
+1. Enable "Integrate with other apps" in the 1Password desktop app (Settings > Developer > Integrate with the 1Password SDKs)
+2. Create items in your vault (default: `Infrastructure`).
+
+#### Generate Stack Units
+
+The stack units are defined in `terragrunt.stack.hcl` and can be auto-generated from `config.json`:
+
+```bash
+python3 main.py
+```
+
+This reads your config JSON and populates the unit blocks in `terragrunt.stack.hcl` for each cluster.
 
 #### Deploy
 
+Commands run from the project root. `main.py` handles stack generation, kubeconfig extraction, and ClusterMesh setup.
+
 ```bash
-# Default config (config.json) + secrets.tfvars auto-loaded
-terragrunt init
-terragrunt plan
-terragrunt apply
+# Generate stack units from config and plan
+python3 main.py --config config.json plan
 
-# Alternate config
-B_CFG=config2.json terragrunt plan
-B_CFG=config2.json terragrunt apply
+# Apply all cluster infrastructure
+python3 main.py --config config.json apply
 
-# Destroying the cluster
-terragrunt destroy
-B_CFG=config2.json terragrunt destroy
+# Destroy everything
+python3 main.py --config config.json destroy
 ```
 
+## Architecture
 
+### Deployment Flow
+
+1. **Config JSON** defines clusters, nodes, and features (Ceph, DNS, Tailscale, etc.)
+2. **Terragrunt Stack** reads the config and creates per-cluster deployment units
+3. Each unit provisions:
+   - Cloud provider resources (Hetzner server / GCP instances)
+   - Talos Linux installation and machine configuration
+   - Tailscale mesh networking on every node
+   - Kubernetes cluster bootstrap
+   - kubeconfig generation
+   - Cilium CNI (with ClusterMesh for multi-cluster)
+   - DNS records (per-node A/AAAA, LB, internal)
+   - Rook Ceph operator and storage cluster
+4. Platform addons are deployed via the platform module
+
+### Networking
+
+- **Tailscale**: All nodes join a tailnet. Node-to-node communication (API server, etcd, Ceph) goes over Tailscale's WireGuard mesh.
+- **Cilium**: CNI with `kubeProxyReplacement=true`. Routing mode is configurable (`native` or `tunnel`, default `native`). Cilium WireGuard encryption is optional (pod-to-pod only by default; `nodeEncryption` can be enabled separately).
+- **Cilium ClusterMesh**: Cross-cluster communication via Tailscale, enabling multi-cluster service discovery.
+- **Hetzner Private Network**: Static per-node private IPs (`10.{network}.1.N` for control planes, `10.{network}.2.N` for workers) provide stable etcd peer endpoints.
+
+## Features
+
+- **Multi-cloud**: Mix GCP and Hetzner nodes in the same cluster
+- **Multi-cluster**: Run multiple independent clusters, connected via Cilium ClusterMesh
+- **Tailscale**: All nodes join a tailnet; Tailscale IPs used for API server, Cilium ClusterMesh, and inter-cluster Ceph
+- **Cilium**: Full Cilium CNI with WireGuard encryption and ClusterMesh
+- **Rook Ceph**: On-cluster block (RBD), filesystem (CephFS), and object (RGW) storage
+- **Config-driven**: All cluster topology and features in a single JSON config
+- **Auto-versioning**: Latest Kubernetes, Talos, and Cilium versions fetched automatically
+
+## Ceph Storage
+
+Rook Ceph is deployed on each cluster with:
+- Block storage via `ceph-block` StorageClass (RBD CSI)
+- Filesystem storage via `ceph-filesystem` StorageClass (CephFS CSI, default)
+- Object storage via RGW (optional)
+- Configurable OSD devices per provider (GCP persistent disks or Hetzner volumes)
 
 ## Servers
 
@@ -139,7 +185,7 @@ B_CFG=config2.json terragrunt destroy
     * Role: Control plane node
     * Machine: CX23 (Intel) with 2 vCPU, 4GB RAM, 40GB storage
  
-* tulip
+* hibiscus
     * Cloud: Hetzner Cloud
     * Region: Helsinki
     * OS: Talos Linux
@@ -170,7 +216,7 @@ graph LR
     subgraph Hetzner [hetzner cluster]
         direction TB
         hetzner_rose["rose (control plane)"]
-        hetzner_tulip["tulip (worker)"]
+        hetzner_hibiscus["hibiscus (worker)"]
     end
 
     subgraph GCP [gcp cluster]
@@ -183,11 +229,11 @@ graph LR
     core_cilium_wireguard["Cilium WireGuard<br>(pod-to-pod) (UDP 51871)"]:::dashed
 
     core_tailscale <--> hetzner_rose
-    core_tailscale <--> hetzner_tulip
+    core_tailscale <--> hetzner_hibiscus
     core_tailscale <--> gcp_lily
     core_tailscale <--> gcp_orchid
     core_cilium_wireguard <--> hetzner_rose
-    core_cilium_wireguard <--> hetzner_tulip
+    core_cilium_wireguard <--> hetzner_hibiscus
     core_cilium_wireguard <--> gcp_lily
     core_cilium_wireguard <--> gcp_orchid
 ```
@@ -206,4 +252,3 @@ GNU Affero General Public License for more details.
 
 You should have received a copy of the GNU Affero General Public License
 along with bouquet2.1.  If not, see <https://www.gnu.org/licenses/>.
-
