@@ -33,6 +33,7 @@ Thumbs.db
 # Generated files
 modules/providers/gke/generated/
 .kubeconfigs
+*.kubeconfig
 __pycache__
 .terragrunt-cache/
 .terragrunt-stack/
