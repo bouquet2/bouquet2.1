@@ -14,7 +14,7 @@ terraform {
     }
     tailscale = {
       source  = "tailscale/tailscale"
-      version = "~> 0.28"
+      version = "~> 0.30"
     }
     talos = {
       source  = "siderolabs/talos"
